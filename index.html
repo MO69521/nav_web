@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0d12" />
+    <meta name="description" content="MO'S SPACE — 为创意工作者打造的个人导航工作台" />
+    <title>MO'S SPACE · 个人导航</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="main-content">
+        <div class="aurora-top" id="auroraTop" aria-hidden="true"></div>
+        <header class="topbar">
+          <div class="topbar-left">
+            <a class="brand" href="#" aria-label="MO'S SPACE 首页">
+              <span class="brand-mark">M</span>
+              <span class="brand-copy"><b>MO'S</b><small>SPACE</small></span>
+            </a>
+            <p class="date-line" id="dateLine"></p>
+          </div>
+          <div class="top-actions">
+            <button class="icon-btn" id="themeToggle" aria-label="切换主题" title="切换主题">☼</button>
+            <button class="icon-btn" id="openAdd" aria-label="添加网址" title="添加网址">＋</button>
+            <button class="icon-btn" id="shuffleBtn" aria-label="随机打开一个网站" title="随机探索">↗</button>
+            <div class="account-control">
+              <button class="avatar" id="accountButton" type="button" aria-label="邮箱登录" title="邮箱登录"><span id="avatarText">MO</span></button>
+              <div class="theme-popover" role="group" aria-label="主题切换">
+                <span class="theme-popover-title">界面主题</span>
+                <div class="theme-options">
+                  <button type="button" data-theme="dark" aria-pressed="true"><i class="theme-preview dark"></i><span>深色</span></button>
+                  <button type="button" data-theme="light" aria-pressed="false"><i class="theme-preview light"></i><span>浅色</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section class="hero">
+          <div class="hero-copy">
+            <span class="eyebrow"><i></i> YOUR DIGITAL WORKSPACE</span>
+            <h1><span id="greeting">上午好</span>，开始创造吧。</h1>
+            <p>把灵感、工具和常用站点，收进属于你的数字空间。</p>
+          </div>
+          <div class="clock-card" aria-label="当前时间">
+            <span id="clock">00:00</span>
+            <small>SHANGHAI · <b>ONLINE</b></small>
+          </div>
+        </section>
+
+        <section class="search-section">
+          <form class="search-box" id="searchForm">
+            <div class="engine-select">
+              <button type="button" id="engineButton"><span id="engineIcon">G</span><span id="engineName">Google</span><span class="chevron">⌄</span></button>
+              <div class="engine-menu" id="engineMenu" hidden></div>
+            </div>
+            <span class="search-divider"></span>
+            <input id="searchInput" autocomplete="off" placeholder="搜索整个互联网，或输入网址…" />
+            <kbd>/</kbd>
+            <button class="search-submit" aria-label="搜索" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button>
+          </form>
+          <div class="quick-searches">
+            <span>快速搜索</span>
+            <button data-query="今日设计趋势">设计趋势</button>
+            <button data-query="AI 产品灵感">AI 灵感</button>
+            <button data-query="前端开发资源">开发资源</button>
+          </div>
+        </section>
+
+        <nav class="category-tabs" id="categoryTabs" aria-label="导航分类"></nav>
+
+        <section class="content-section">
+          <div class="site-grid" id="siteGrid"></div>
+          <div class="empty-state" id="emptyState" hidden><span>◇</span><h3>这里还没有内容</h3><p>点右上角“＋”，建立你的第一条收藏。</p></div>
+        </section>
+
+        <footer><span>MO'S SPACE © 2026</span><span>Designed for focus &amp; flow.</span></footer>
+      </main>
+    </div>
+
+    <dialog id="addDialog">
+      <form method="dialog" id="addForm">
+        <div class="dialog-heading"><div><span class="section-kicker">NEW SHORTCUT</span><h2>添加到我的空间</h2></div><button type="button" id="closeDialog" aria-label="关闭">×</button></div>
+        <label>网站名称<input name="name" required maxlength="24" placeholder="例如：我的作品集" /></label>
+        <label>网站地址<input name="url" required type="url" placeholder="https://example.com" /></label>
+        <label>分类<select name="category"></select></label>
+        <div class="dialog-actions"><button type="button" id="cancelAdd" class="secondary">取消</button><button value="default" class="primary" id="confirmAdd">添加网址</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="categoryDialog">
+      <form method="dialog" id="categoryForm">
+        <div class="dialog-heading"><div><span class="section-kicker">NEW CATEGORY</span><h2>新建导航分类</h2></div><button type="button" id="closeCategoryDialog" aria-label="关闭">×</button></div>
+        <label>分类名称<input name="categoryName" required maxlength="12" placeholder="例如：摄影灵感" /></label>
+        <div class="dialog-actions"><button type="button" id="cancelCategory" class="secondary">取消</button><button type="button" class="primary" id="confirmCategory">创建分类</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="groupDialog" class="group-dialog">
+      <div class="group-dialog-content">
+        <div class="dialog-heading">
+          <button type="button" id="groupBackButton" class="group-back-button" aria-label="返回上一级" hidden>←</button>
+          <div><span class="section-kicker">SITE GROUP</span><input id="groupNameInput" aria-label="分组名称" maxlength="12" /></div>
+          <button type="button" id="closeGroupDialog" aria-label="关闭">×</button>
+        </div>
+        <div class="group-dialog-sites" id="groupDialogSites"></div>
+        <div class="dialog-actions"><button type="button" id="ungroupSites" class="secondary">解散分组</button><button type="button" id="finishGroup" class="primary">完成</button></div>
+      </div>
+    </dialog>
+
+    <dialog id="authDialog" class="auth-dialog">
+      <form id="authForm">
+        <div class="dialog-heading"><div><span class="section-kicker">PERSONAL ACCOUNT</span><h2 id="authTitle">邮箱登录</h2></div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button></div>
+        <div id="authGuestView">
+          <button class="saved-credential-login" id="savedCredentialLogin" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7a4 4 0 1 1-7.7 1.5A4 4 0 0 1 15 7Z"></path><path d="m14 10 7 7-2 2-1.5-1.5-1.5 1.5-2-2 1.5-1.5-3.2-3.2"></path></svg><span id="savedCredentialText">使用已保存账号一键登录</span></button>
+          <div class="auth-divider"><span>或使用邮箱密码</span></div>
+          <label>邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username" placeholder="you@example.com" /></label>
+          <label>密码<input id="authPassword" name="password" required type="password" minlength="6" autocomplete="current-password" placeholder="至少 6 位密码" /></label>
+          <p class="auth-message" id="authMessage" role="status"></p>
+          <div class="auth-switch"><span id="authSwitchHint">还没有账号？</span><button type="button" id="authSwitchMode">创建账号</button></div>
+          <button class="auth-submit" id="authSubmit" type="submit">登录</button>
+        </div>
+        <div class="auth-user-view" id="authUserView" hidden>
+          <span class="auth-user-avatar" id="authUserAvatar">MO</span>
+          <strong id="authUserEmail"></strong>
+          <p>当前邮箱账号已登录。</p>
+          <button class="auth-logout" id="authLogout" type="button">退出登录</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
