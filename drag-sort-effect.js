@@ -3,18 +3,42 @@ export function createDragSortEffect({ container, itemSelector }) {
   let source = null;
   let ghost = null;
   let lastX = 0;
+  let pointerX = 0;
+  let pointerY = 0;
+  let magnetTarget = null;
+  let magnetStrength = 0;
 
   function items() {
     return [...container.querySelectorAll(itemSelector)];
+  }
+
+  function positionGhost() {
+    if (!ghost) return;
+    let x = pointerX;
+    let y = pointerY;
+    if (magnetTarget?.isConnected && magnetStrength > 0) {
+      const rect = magnetTarget.getBoundingClientRect();
+      x += (rect.left + rect.width / 2 - x) * magnetStrength;
+      y += (rect.top + Math.min(52, rect.height / 2) - y) * magnetStrength;
+    }
+    ghost.style.left = `${x - 56}px`;
+    ghost.style.top = `${y - 63}px`;
   }
 
   function move(event) {
     if (!ghost) return;
     const tilt = Math.max(-4, Math.min(4, (event.clientX - lastX) * .28));
     lastX = event.clientX;
-    ghost.style.left = `${event.clientX - 56}px`;
-    ghost.style.top = `${event.clientY - 63}px`;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
     ghost.style.setProperty('--sort-ghost-tilt', `${tilt}deg`);
+    positionGhost();
+  }
+
+  function setMagnetTarget(target = null, strength = 0) {
+    magnetTarget = target;
+    magnetStrength = Math.max(0, Math.min(.5, strength));
+    positionGhost();
   }
 
   function start(item, event) {
@@ -29,6 +53,10 @@ export function createDragSortEffect({ container, itemSelector }) {
     ghost.classList.remove('dragging', 'group-item-dragging', 'reflow-from', 'reflow-to', 'group-reflow-from', 'group-reflow-to', 'group-target', 'reorder-target', 'drop-after');
     ghost.classList.add('sort-drag-ghost');
     lastX = event.clientX;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    magnetTarget = null;
+    magnetStrength = 0;
     const portal = container.closest('dialog')?.open ? container.closest('dialog') : document.body;
     portal.appendChild(ghost);
     document.body.classList.add('is-dragging-sites');
@@ -77,6 +105,8 @@ export function createDragSortEffect({ container, itemSelector }) {
     const finishedGhost = ghost;
     source = null;
     ghost = null;
+    magnetTarget = null;
+    magnetStrength = 0;
     document.body.classList.remove('is-dragging-sites');
 
     if (!finishedSource || !finishedGhost || !settle) {
@@ -106,5 +136,5 @@ export function createDragSortEffect({ container, itemSelector }) {
     if (ghost) portal.appendChild(ghost);
   }
 
-  return { start, move, reflow, finish, movePortal, items };
+  return { start, move, setMagnetTarget, reflow, finish, movePortal, items };
 }

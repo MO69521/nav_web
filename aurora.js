@@ -144,20 +144,23 @@ export function initAurora(container) {
     frameId = requestAnimationFrame(render);
   };
 
-  const onVisibilityChange = () => {
-    running = !document.hidden;
+  const syncRunningState = () => {
+    running = !document.hidden && !document.body.classList.contains('light-theme');
     cancelAnimationFrame(frameId);
     if (running) frameId = requestAnimationFrame(render);
   };
 
-  document.addEventListener('visibilitychange', onVisibilityChange);
-  frameId = requestAnimationFrame(render);
+  const themeObserver = new MutationObserver(syncRunningState);
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('visibilitychange', syncRunningState);
+  syncRunningState();
 
   return () => {
     running = false;
     cancelAnimationFrame(frameId);
     resizeObserver.disconnect();
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    themeObserver.disconnect();
+    document.removeEventListener('visibilitychange', syncRunningState);
     gl.getExtension('WEBGL_lose_context')?.loseContext();
     gl.canvas.remove();
   };
