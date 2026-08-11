@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test"
   },
   "devDependencies": {
+    "@netlify/vite-plugin": "^2.12.9",
     "@vitejs/plugin-vue": "^6.0.8",
     "vite": "^7.1.1"
   },
   "dependencies": {
+    "@netlify/blobs": "9.1.5",
     "@netlify/identity": "^1.2.0",
     "ogl": "^1.0.11",
     "vue": "^3.5.41"

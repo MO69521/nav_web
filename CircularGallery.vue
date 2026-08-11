@@ -77,6 +77,10 @@ class GalleryMedia {
   program: Program;
   private titleAspect = 1;
 
+  scaleLoopOffset(factor: number) {
+    this.extra *= factor;
+  }
+
   constructor(
     private gl: GL,
     geometry: Plane,
@@ -235,6 +239,7 @@ class CircularGalleryApp {
   private startScroll = 0;
   private scroll = { current: 0, target: 0, last: 0 };
   private settleTimer = 0;
+  private active = false;
 
   constructor(
     private container: HTMLElement,
@@ -271,16 +276,32 @@ class CircularGalleryApp {
   }
 
   private resize = () => {
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+    if (width < 2 || height < 2) {
+      this.active = false;
+      return;
+    }
+    const previousMediaWidth = this.medias[0]?.width || 0;
     this.screen = {
-      width: Math.max(1, this.container.clientWidth),
-      height: Math.max(1, this.container.clientHeight)
+      width,
+      height
     };
     this.renderer.setSize(this.screen.width, this.screen.height);
     this.camera.perspective({ aspect: this.screen.width / this.screen.height });
     const fov = this.camera.fov * Math.PI / 180;
-    const height = 2 * Math.tan(fov / 2) * this.camera.position.z;
-    this.viewport = { width: height * this.camera.aspect, height };
+    const viewportHeight = 2 * Math.tan(fov / 2) * this.camera.position.z;
+    this.viewport = { width: viewportHeight * this.camera.aspect, height: viewportHeight };
     this.medias.forEach(media => media.resize(this.screen, this.viewport));
+    const nextMediaWidth = this.medias[0]?.width || 0;
+    if (previousMediaWidth && nextMediaWidth) {
+      const factor = nextMediaWidth / previousMediaWidth;
+      this.scroll.current *= factor;
+      this.scroll.target *= factor;
+      this.scroll.last *= factor;
+      this.medias.forEach(media => media.scaleLoopOffset(factor));
+    }
+    this.active = true;
   };
 
   private settle = () => {
@@ -290,7 +311,7 @@ class CircularGalleryApp {
   };
 
   private pointerDown = (event: PointerEvent) => {
-    if (event.button !== 0) return;
+    if (!this.active || event.button !== 0) return;
     this.down = true;
     this.startX = event.clientX;
     this.startScroll = this.scroll.target;
@@ -309,6 +330,7 @@ class CircularGalleryApp {
   };
 
   private wheel = (event: WheelEvent) => {
+    if (!this.active) return;
     event.preventDefault();
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
     this.scroll.target += Math.sign(delta || 1) * this.options.scrollSpeed * 0.42;
@@ -325,6 +347,10 @@ class CircularGalleryApp {
   }
 
   private update = () => {
+    if (!this.active) {
+      this.frame = requestAnimationFrame(this.update);
+      return;
+    }
     this.scroll.current = lerp(this.scroll.current, this.scroll.target, this.options.scrollEase);
     const direction = this.scroll.current > this.scroll.last ? 'right' : 'left';
     this.medias.forEach(media => media.update(this.scroll, direction, this.viewport));

@@ -3,6 +3,7 @@ import { createDragSortEffect } from './drag-sort-effect.js';
 import { createRotatingText } from './rotating-text.js';
 import { createSpecularButton, createSpecularButtonGroup } from './specular-button.js';
 import { hydrateRollingNavLabels, rollingNavLabel } from './rolling-nav.js';
+import { createShareToken, isSafeNoteImageSource } from './cloud-content.js';
 import { createApp, h, reactive } from 'vue';
 import SplashCursor from './SplashCursor.vue';
 import CircularGallery from './CircularGallery.vue';
@@ -54,9 +55,35 @@ const defaultGalleryItems = [
   { id: 'gallery-10', title: '人物与光影', board: '摄影参考', image: otomePlaceholder(10), source: '' }
 ];
 
+const cloudWorkspaceKeys = new Set([
+  'mos-custom-sites',
+  'mos-custom-categories',
+  'mos-hidden-built-in-categories',
+  'mos-hidden-sites',
+  'mos-site-order',
+  'mos-site-groups',
+  'mos-gallery-items',
+  'mos-notes',
+  'mos-active-note-id',
+  'mos-light-theme',
+  'mos-splash-cursor-enabled',
+  'mos-note-outline-collapsed',
+  'mos-note-sidebar-width',
+  'mos-note-outline-width'
+]);
+let cloudWorkspaceReady = false;
+let cloudWorkspaceApplying = false;
+let cloudWorkspaceSyncTimer = null;
+let cloudWorkspaceUserKey = '';
+let cloudWorkspaceErrorShown = false;
+let cloudWorkspaceInitPromise = null;
+
 const store = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
-  set(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+  set(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+    if (cloudWorkspaceKeys.has(key)) scheduleCloudWorkspaceSync();
+  }
 };
 
 let customSites = store.get('mos-custom-sites', []);
@@ -117,6 +144,9 @@ notes = notes.filter(note => note && typeof note === 'object').map((note, index)
 }));
 if (!notes.length) notes = structuredClone(defaultNotes);
 let activeNoteId = store.get('mos-active-note-id', notes[0].id);
+let activeSharedNote = null;
+let localNoteIdBeforeShare = null;
+let sharedNoteSaveTimer = null;
 let currentWorkspaceView = 'bookmarks';
 let noteSaveTimer = null;
 let savedNoteRange = null;
@@ -127,6 +157,21 @@ let noteMarqueeBlocks = [];
 let activeNoteCallout = null;
 let activeNoteTable = null;
 let activeNoteTableCell = null;
+let activeNoteTableCells = [];
+let noteTableSelectionAnchor = null;
+let noteTablePointerSelection = null;
+let noteTableSuppressClick = false;
+let noteTableHoverAxis = null;
+let noteTableInsertBoundary = null;
+let noteTableAxisDragState = null;
+let noteTableSuppressAxisClick = false;
+let noteTableResizeCandidate = null;
+let noteTableResizeState = null;
+let noteTableOuterResizeCandidate = null;
+let noteTableOuterResizeState = null;
+let noteTableContentHandleCell = null;
+let noteTableContentDragState = null;
+let nativeNoteTableContentDrag = null;
 let pendingNoteTableContext = null;
 let noteTablePickerRows = 3;
 let noteTablePickerColumns = 3;
@@ -148,6 +193,7 @@ let activeNoteHeading = null;
 let noteHeadingToolsHideTimer = null;
 let noteOutlineNavigationTarget = null;
 let noteOutlineNavigationEndTimer = null;
+const noteTitleEmojis = ['📄', '📝', '📌', '💡', '🎯', '✅', '⭐', '🔥', '🚀', '🎉', '❤️', '🧠', '👀', '💬', '📚', '📊', '📅', '🗂️', '🔖', '✨', '🌱', '🟢', '🔵', '🟡', '🟣', '⚡', '🛠️', '🎨', '📷', '🧩'];
 const trimmedNoteImages = new WeakSet();
 const noteEditHistories = new Map();
 let restoringNoteHistory = false;
@@ -157,6 +203,184 @@ let splashCursorApp = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+function cloudWorkspaceSnapshot() {
+  return {
+    schemaVersion: 1,
+    updatedAt: Date.now(),
+    customSites,
+    customCategories,
+    hiddenBuiltInCategories: [...hiddenBuiltInCategories],
+    hiddenSites: [...hiddenSites],
+    siteOrder,
+    siteGroups,
+    galleryItems,
+    notes,
+    activeNoteId: isActiveSharedNote() ? (localNoteIdBeforeShare || store.get('mos-active-note-id', notes[0]?.id)) : activeNoteId,
+    settings: {
+      lightTheme: Boolean(store.get('mos-light-theme', false)),
+      splashCursorEnabled: Boolean(store.get('mos-splash-cursor-enabled', true)),
+      noteOutlineCollapsed: Boolean(store.get('mos-note-outline-collapsed', false)),
+      noteSidebarWidth: Number(store.get('mos-note-sidebar-width', 270)) || 270,
+      noteOutlineWidth: Number(store.get('mos-note-outline-width', 190)) || 190
+    }
+  };
+}
+
+function normalizeCloudNotes(value) {
+  const source = Array.isArray(value) && value.length ? value : structuredClone(defaultNotes);
+  return source.filter(note => note && typeof note === 'object').map((note, index) => ({
+    id: String(note.id || `note-recovered-${index}`),
+    title: String(note.title || '无标题文档'),
+    content: sanitizeNoteHTML(String(note.content || '')),
+    createdAt: Number(note.createdAt) || Date.now(),
+    updatedAt: Number(note.updatedAt) || Date.now(),
+    sharing: {
+      enabled: Boolean(note.sharing?.enabled),
+      permission: note.sharing?.permission === 'edit' ? 'edit' : 'view',
+      token: String(note.sharing?.token || '')
+    }
+  }));
+}
+
+function applyCloudWorkspace(workspace) {
+  if (!workspace || typeof workspace !== 'object') return;
+  const sharedViewActive = isActiveSharedNote();
+  cloudWorkspaceApplying = true;
+  try {
+    customSites = Array.isArray(workspace.customSites) ? workspace.customSites : [];
+    customCategories = Array.isArray(workspace.customCategories) ? workspace.customCategories : [];
+    hiddenBuiltInCategories = new Set(Array.isArray(workspace.hiddenBuiltInCategories) ? workspace.hiddenBuiltInCategories.filter(id => id !== 'all') : []);
+    hiddenSites = new Set(Array.isArray(workspace.hiddenSites) ? workspace.hiddenSites : []);
+    siteOrder = Array.isArray(workspace.siteOrder) ? workspace.siteOrder : [];
+    siteGroups = (Array.isArray(workspace.siteGroups) ? workspace.siteGroups : []).map(group => ({ ...group, parentId: group.parentId ?? null }));
+    galleryItems = Array.isArray(workspace.galleryItems) ? workspace.galleryItems : structuredClone(defaultGalleryItems);
+    notes = normalizeCloudNotes(workspace.notes);
+    const nextLocalNoteId = notes.some(note => note.id === workspace.activeNoteId) ? workspace.activeNoteId : notes[0]?.id;
+    activeNoteId = nextLocalNoteId;
+    const settings = workspace.settings && typeof workspace.settings === 'object' ? workspace.settings : {};
+
+    store.set('mos-custom-sites', customSites);
+    store.set('mos-custom-categories', customCategories);
+    store.set('mos-hidden-built-in-categories', [...hiddenBuiltInCategories]);
+    store.set('mos-hidden-sites', [...hiddenSites]);
+    store.set('mos-site-order', siteOrder);
+    store.set('mos-site-groups', siteGroups);
+    store.set('mos-gallery-items', galleryItems);
+    store.set('mos-notes', notes);
+    store.set('mos-active-note-id', nextLocalNoteId);
+    store.set('mos-light-theme', Boolean(settings.lightTheme));
+    store.set('mos-splash-cursor-enabled', settings.splashCursorEnabled !== false);
+    store.set('mos-note-outline-collapsed', Boolean(settings.noteOutlineCollapsed));
+    store.set('mos-note-sidebar-width', Number(settings.noteSidebarWidth) || 270);
+    store.set('mos-note-outline-width', Number(settings.noteOutlineWidth) || 190);
+
+    noteOutlineCollapsed = Boolean(settings.noteOutlineCollapsed);
+    splashCursorEnabled = settings.splashCursorEnabled !== false;
+    applyTheme(settings.lightTheme ? 'light' : 'dark');
+    setSplashCursorEnabled(splashCursorEnabled);
+    applyStoredNoteColumnWidths();
+    applyNoteOutlineCollapsedState({ persist: false });
+    if (sharedViewActive) activeNoteId = activeSharedNote.id;
+    renderCategoryOptions();
+    renderSites();
+    renderGallery();
+    loadActiveNote();
+  } finally {
+    cloudWorkspaceApplying = false;
+  }
+}
+
+async function putCloudWorkspace(workspace = cloudWorkspaceSnapshot()) {
+  const response = await fetch('/api/workspace', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ workspace })
+  });
+  if (!response.ok) throw new Error(response.status === 413 ? '云端工作区容量已满' : '云端保存失败');
+  return response.json();
+}
+
+async function migrateWorkspaceImagesToCloud(workspace) {
+  if (!currentUser) return workspace;
+  const migrated = structuredClone(workspace);
+  for (const item of migrated.galleryItems || []) {
+    if (String(item.image || '').startsWith('data:image/')) item.image = await uploadCloudImage(item.image, `${item.id || 'gallery'}.webp`);
+  }
+  for (const note of migrated.notes || []) {
+    if (!String(note.content || '').includes('data:image/')) continue;
+    const documentFragment = new DOMParser().parseFromString(String(note.content || ''), 'text/html');
+    for (const [index, image] of [...documentFragment.body.querySelectorAll('img')].entries()) {
+      if (!String(image.src || '').startsWith('data:image/')) continue;
+      image.src = await uploadCloudImage(image.src, `${note.id || 'note'}-${index + 1}.webp`);
+    }
+    note.content = documentFragment.body.innerHTML;
+  }
+  return migrated;
+}
+
+async function syncCloudWorkspace() {
+  if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser) return;
+  try {
+    await putCloudWorkspace();
+    cloudWorkspaceErrorShown = false;
+  } catch (error) {
+    if (!cloudWorkspaceErrorShown) {
+      cloudWorkspaceErrorShown = true;
+      showToast(`${error.message || '云端保存失败'}，内容仍保存在本机`, { duration: 4200 });
+    }
+  }
+}
+
+function scheduleCloudWorkspaceSync() {
+  if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser) return;
+  clearTimeout(cloudWorkspaceSyncTimer);
+  cloudWorkspaceSyncTimer = setTimeout(syncCloudWorkspace, 900);
+}
+
+function resetCloudWorkspaceSession() {
+  clearTimeout(cloudWorkspaceSyncTimer);
+  cloudWorkspaceSyncTimer = null;
+  cloudWorkspaceReady = false;
+  cloudWorkspaceUserKey = '';
+  cloudWorkspaceErrorShown = false;
+  cloudWorkspaceInitPromise = null;
+}
+
+async function initializeCloudWorkspace({ announce = false } = {}) {
+  if (!currentUser) {
+    resetCloudWorkspaceSession();
+    return;
+  }
+  const userKey = `${currentUser.provider || 'identity'}:${currentUser.id || currentUser.email || currentUser.name || ''}`;
+  if (cloudWorkspaceReady && cloudWorkspaceUserKey === userKey) return;
+  if (cloudWorkspaceInitPromise && cloudWorkspaceUserKey === userKey) return cloudWorkspaceInitPromise;
+  cloudWorkspaceReady = false;
+  cloudWorkspaceUserKey = userKey;
+  cloudWorkspaceInitPromise = (async () => {
+    try {
+      const response = await fetch('/api/workspace', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(response.status === 401 ? '登录状态已过期' : '云端工作区读取失败');
+      const payload = await response.json();
+      if (payload.workspace) applyCloudWorkspace(payload.workspace);
+      else {
+        const migratedWorkspace = await migrateWorkspaceImagesToCloud(cloudWorkspaceSnapshot());
+        applyCloudWorkspace(migratedWorkspace);
+        await putCloudWorkspace(migratedWorkspace);
+      }
+      cloudWorkspaceReady = true;
+      if (announce) showToast(payload.workspace ? '云端工作区已同步' : '本机内容已安全同步到云端');
+    } catch (error) {
+      resetCloudWorkspaceSession();
+      showToast(`${error.message || '云端同步失败'}，当前继续使用本机内容`, { duration: 4400 });
+    } finally {
+      cloudWorkspaceInitPromise = null;
+    }
+  })();
+  return cloudWorkspaceInitPromise;
+}
+
 hydrateRollingNavLabels();
 const allSites = () => {
   const sites = [...baseSites, ...customSites].filter(site => !hiddenSites.has(site.id));
@@ -312,8 +536,11 @@ function renderSites() {
   });
   const groupedView = !query && currentCategory === 'all';
   const siteMarkup = groupedView ? renderGroupedSites(sites) : sites.map(siteCard).join('');
-  const addButton = query ? '' : '<button class="add-site-card" type="button" data-action="open-add"><span><i class="add-symbol">＋</i></span><strong>新增网址</strong></button>';
-  $('#siteGrid').innerHTML = `${siteMarkup}${addButton}`;
+  const actionButtons = query ? '' : `<div class="bookmark-grid-actions" role="group" aria-label="书签快捷操作">
+    <button class="add-site-card" type="button" data-action="open-add"><span><i class="add-symbol">＋</i></span><strong>新增网址</strong></button>
+    <button class="add-site-card import-bookmarks-card" type="button" data-action="import-bookmarks" aria-label="从 Chrome、Safari、Edge 或 Firefox 导入书签"><span><i class="add-symbol">↓</i></span><strong>导入书签</strong></button>
+  </div>`;
+  $('#siteGrid').innerHTML = `${siteMarkup}${actionButtons}`;
   $('#siteGrid').classList.add('compact-grid');
   $('#emptyState').hidden = sites.length > 0 || !query;
   if (query && sites.length === 0) {
@@ -391,19 +618,89 @@ function renderGallery() {
 }
 
 function noteById(noteId = activeNoteId) {
+  if (activeSharedNote?.id === noteId) return activeSharedNote;
   return notes.find(note => note.id === noteId) ?? null;
+}
+
+function isActiveSharedNote() {
+  return Boolean(activeSharedNote && activeSharedNote.id === activeNoteId);
 }
 
 function noteShareToken(note) {
   if (!note.sharing) note.sharing = { enabled: false, permission: 'view', token: '' };
-  if (!note.sharing.token) note.sharing.token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  if (!note.sharing.token) {
+    note.sharing.token = createShareToken();
+  }
   return note.sharing.token;
 }
 
 function noteShareURL(note) {
   const url = new URL(window.location.href);
-  url.hash = `note=${encodeURIComponent(note.id)}&share=${encodeURIComponent(noteShareToken(note))}`;
+  url.hash = `share=${encodeURIComponent(noteShareToken(note))}`;
   return url.toString();
+}
+
+function sharedNotePayload(note) {
+  return {
+    id: String(note.id || 'shared-note'),
+    title: String(note.title || '无标题文档'),
+    content: sanitizeNoteHTML(String(note.content || '')),
+    updatedAt: Number(note.updatedAt) || Date.now()
+  };
+}
+
+async function publishNoteShare(note) {
+  if (!note?.sharing?.enabled) return;
+  if (!currentUser) throw new Error('请先登录再开启链接分享');
+  const token = noteShareToken(note);
+  const response = await fetch(`/api/shares/${encodeURIComponent(token)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ note: sharedNotePayload(note), permission: note.sharing.permission })
+  });
+  if (!response.ok) throw new Error(response.status === 413 ? '文档过大，暂时无法分享' : '分享内容发布失败');
+}
+
+async function removeNoteShare(note) {
+  if (!note?.sharing?.token || !currentUser) return;
+  const response = await fetch(`/api/shares/${encodeURIComponent(note.sharing.token)}`, { method: 'DELETE', credentials: 'same-origin' });
+  if (!response.ok && response.status !== 404) throw new Error('关闭分享失败');
+}
+
+async function saveSharedNote() {
+  if (!activeSharedNote || activeSharedNote.sharePermission !== 'edit') return;
+  const response = await fetch(`/api/shares/${encodeURIComponent(activeSharedNote.shareToken)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ note: sharedNotePayload(activeSharedNote) })
+  });
+  if (!response.ok) throw new Error(response.status === 403 ? '此分享链接已设为仅查看' : '共享文档保存失败');
+}
+
+async function loadSharedNoteFromLocation() {
+  const params = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const token = params.get('share');
+  if (!token) return false;
+  try {
+    const response = await fetch(`/api/shares/${encodeURIComponent(token)}`, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(response.status === 404 ? '分享链接已失效' : '分享文档读取失败');
+    const payload = await response.json();
+    localNoteIdBeforeShare = notes.some(note => note.id === activeNoteId) ? activeNoteId : notes[0]?.id;
+    activeSharedNote = {
+      ...sharedNotePayload(payload.note),
+      id: `shared:${token}`,
+      shareToken: token,
+      sharePermission: payload.permission === 'edit' ? 'edit' : 'view'
+    };
+    activeNoteId = activeSharedNote.id;
+    switchWorkspaceView('notes');
+    showToast(activeSharedNote.sharePermission === 'edit' ? '已打开可编辑共享文档' : '已打开仅查看共享文档');
+    return true;
+  } catch (error) {
+    showToast(error.message || '分享文档打开失败', { duration: 4400 });
+    return false;
+  }
 }
 
 function renderNoteSharePanel() {
@@ -514,6 +811,7 @@ function restoreNoteHistorySnapshot(snapshot) {
   const title = $('#noteTitle');
   title.value = snapshot.title;
   editor.innerHTML = sanitizeNoteHTML(snapshot.content);
+  leftAlignNoteTablesInContentLane();
   prepareNoteImages();
   renderNoteOutline();
   closeNoteSlashMenu();
@@ -615,6 +913,8 @@ function sanitizeNoteStyle(styleText = '') {
   add('border-left-color', safeColor);
   add('border-radius', safeBoxLength);
   add('vertical-align', value => /^(?:baseline|sub|super|middle|text-top|text-bottom|top|bottom|-?\d+(?:\.\d+)?(?:px|em|rem|%))$/.test(value));
+  add('width', value => /^(?:auto|\d+(?:\.\d+)?(?:px|pt|em|rem|%))$/.test(value));
+  add('height', value => /^(?:auto|\d+(?:\.\d+)?(?:px|pt|em|rem|%))$/.test(value));
   add('white-space', value => /^(?:normal|pre|pre-wrap|pre-line|break-spaces)$/.test(value));
   return safeRules.join(';');
 }
@@ -684,7 +984,7 @@ function sanitizeNoteHTML(html = '') {
   template.innerHTML = String(html);
   template.content.querySelectorAll('#noteTablePicker, .note-table-picker').forEach(picker => picker.remove());
   normalizeExternalNoteHTML(template);
-  const allowedTags = new Set(['P', 'BR', 'DIV', 'SPAN', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'SUP', 'SUB', 'MARK', 'SMALL', 'BIG', 'A', 'H1', 'H2', 'H3', 'H4', 'H5', 'UL', 'OL', 'LI', 'DL', 'DT', 'DD', 'BLOCKQUOTE', 'PRE', 'CODE', 'KBD', 'HR', 'FIGURE', 'FIGCAPTION', 'IMG', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']);
+  const allowedTags = new Set(['P', 'BR', 'DIV', 'SPAN', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'STRIKE', 'DEL', 'SUP', 'SUB', 'MARK', 'SMALL', 'BIG', 'A', 'H1', 'H2', 'H3', 'H4', 'H5', 'UL', 'OL', 'LI', 'DL', 'DT', 'DD', 'BLOCKQUOTE', 'PRE', 'CODE', 'KBD', 'HR', 'FIGURE', 'FIGCAPTION', 'IMG', 'TABLE', 'COLGROUP', 'COL', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']);
   const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'FORM', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'SVG', 'MATH']);
   [...template.content.querySelectorAll('*')].forEach(element => {
     if (!allowedTags.has(element.tagName)) {
@@ -695,7 +995,7 @@ function sanitizeNoteHTML(html = '') {
     let safeStyle = sanitizeNoteStyle(element.getAttribute('style') || '');
     if (element.tagName === 'IMG') {
       const src = element.getAttribute('src') || '';
-      const safeSource = /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(src) || /^https:\/\//i.test(src);
+      const safeSource = isSafeNoteImageSource(src);
       [...element.attributes].forEach(attribute => {
         if (!['src', 'alt', 'title', 'width', 'height'].includes(attribute.name)) element.removeAttribute(attribute.name);
       });
@@ -712,8 +1012,14 @@ function sanitizeNoteHTML(html = '') {
       element.className = 'note-image-grid';
       if (equalColumns) element.dataset.equalColumns = 'true';
     } else if (element.tagName === 'TABLE') {
+      const freezeRowHeader = element.dataset.freezeRowHeader === 'true';
+      const freezeColumnHeader = element.dataset.freezeColumnHeader === 'true';
       [...element.attributes].forEach(attribute => element.removeAttribute(attribute.name));
       element.className = 'note-table';
+      if (freezeRowHeader) element.dataset.freezeRowHeader = 'true';
+      if (freezeColumnHeader) element.dataset.freezeColumnHeader = 'true';
+    } else if (['COLGROUP', 'COL'].includes(element.tagName)) {
+      [...element.attributes].forEach(attribute => element.removeAttribute(attribute.name));
     } else if (['THEAD', 'TBODY', 'TR', 'TH', 'TD'].includes(element.tagName)) {
       [...element.attributes].forEach(attribute => {
         if (!['colspan', 'rowspan'].includes(attribute.name)) element.removeAttribute(attribute.name);
@@ -1056,8 +1362,9 @@ function prepareNoteImages() {
       image.closest('figure')?.style.setProperty('--note-image-ratio', ratio);
       syncNoteImageGridLayout(image.closest('.note-image-grid'));
     };
-    image.draggable = true;
-    image.title = '点击放大查看，拖动可调整布局';
+    const insideTable = Boolean(image.closest('td, th'));
+    image.draggable = !insideTable;
+    image.title = insideTable ? '点击放大查看' : '点击放大查看，拖动可调整布局';
     if (image.complete) updateRatio();
     else image.addEventListener('load', updateRatio, { once: true });
     trimNoteImageTransparency(image).then(changed => {
@@ -1160,6 +1467,10 @@ function positionNoteBlockDragHandle(block = activeNoteBlock) {
 }
 
 function showNoteBlockDragHandle(block) {
+  if (block?.matches?.('table.note-table')) {
+    hideNoteBlockDragHandle({ immediate: true });
+    return;
+  }
   clearTimeout(noteBlockHandleHideTimer);
   activeNoteBlock = block;
   positionNoteBlockDragHandle(block);
@@ -1261,6 +1572,7 @@ function clearNoteMarqueeSelection() {
 
 function handleNoteMarqueePointerDown(event) {
   if (event.button !== 0) return;
+  if (noteTableOuterResizeState || noteTableResizeState || noteTableAxisDragState || noteTableContentDragState) return;
   if (event.target !== $('#noteEditor')) {
     clearNoteMarqueeSelection();
     return;
@@ -1464,15 +1776,33 @@ function fileToNoteImage(file) {
   });
 }
 
+function dataUrlToBlob(dataUrl) {
+  const [header, encoded] = String(dataUrl).split(',');
+  const type = header.match(/^data:([^;]+)/)?.[1] || 'application/octet-stream';
+  const bytes = Uint8Array.from(atob(encoded || ''), character => character.charCodeAt(0));
+  return new Blob([bytes], { type });
+}
+
+async function uploadCloudImage(source, filename = 'image') {
+  if (!currentUser || !String(source).startsWith('data:image/')) return source;
+  const form = new FormData();
+  form.append('file', dataUrlToBlob(source), filename);
+  const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', body: form });
+  if (!response.ok) throw new Error(response.status === 413 ? '图片过大，请压缩后重试' : '图片上传失败');
+  const payload = await response.json();
+  return payload.url;
+}
+
 async function insertNoteImageFile(file, placement = null) {
   const button = $('#insertNoteImage');
   button.disabled = true;
   button.textContent = '处理中…';
   try {
     const dataUrl = await fileToNoteImage(file);
+    const source = await uploadCloudImage(dataUrl, file.name || 'note-image');
     const alt = (file.name || '文档图片').replace(/\.[^.]+$/, '');
-    insertNoteImageSource(dataUrl, alt, placement);
-    showToast('图片已插入');
+    insertNoteImageSource(source, alt, placement);
+    showToast(currentUser ? '图片已上传并插入' : '图片已插入（登录后可云端保存）');
   } catch (error) {
     showToast(error.message || '图片插入失败');
   } finally {
@@ -1580,11 +1910,1106 @@ function ensureNoteTableTail(table) {
   return tail;
 }
 
+function noteTableGrid(table) {
+  const rows = [...(table?.rows || [])];
+  const matrix = [];
+  const meta = new Map();
+  rows.forEach((row, rowIndex) => {
+    matrix[rowIndex] ||= [];
+    let columnIndex = 0;
+    [...row.cells].forEach(cell => {
+      while (matrix[rowIndex][columnIndex]) columnIndex += 1;
+      const rowspan = Math.max(1, Number(cell.rowSpan) || 1);
+      const colspan = Math.max(1, Number(cell.colSpan) || 1);
+      const details = { row: rowIndex, column: columnIndex, rowspan, colspan };
+      meta.set(cell, details);
+      for (let rowOffset = 0; rowOffset < rowspan; rowOffset += 1) {
+        matrix[rowIndex + rowOffset] ||= [];
+        for (let columnOffset = 0; columnOffset < colspan; columnOffset += 1) {
+          matrix[rowIndex + rowOffset][columnIndex + columnOffset] = cell;
+        }
+      }
+      columnIndex += colspan;
+    });
+  });
+  return {
+    rows,
+    matrix,
+    meta,
+    rowCount: matrix.length,
+    columnCount: Math.max(0, ...matrix.map(row => row.length))
+  };
+}
+
+function noteTableCellsBetween(table, startCell, endCell) {
+  const grid = noteTableGrid(table);
+  const start = grid.meta.get(startCell);
+  const end = grid.meta.get(endCell);
+  if (!start || !end) return [];
+  let top = Math.min(start.row, end.row);
+  let left = Math.min(start.column, end.column);
+  let bottom = Math.max(start.row + start.rowspan - 1, end.row + end.rowspan - 1);
+  let right = Math.max(start.column + start.colspan - 1, end.column + end.colspan - 1);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (let row = top; row <= bottom; row += 1) {
+      for (let column = left; column <= right; column += 1) {
+        const details = grid.meta.get(grid.matrix[row]?.[column]);
+        if (!details) continue;
+        const nextTop = Math.min(top, details.row);
+        const nextLeft = Math.min(left, details.column);
+        const nextBottom = Math.max(bottom, details.row + details.rowspan - 1);
+        const nextRight = Math.max(right, details.column + details.colspan - 1);
+        if (nextTop !== top || nextLeft !== left || nextBottom !== bottom || nextRight !== right) expanded = true;
+        top = nextTop;
+        left = nextLeft;
+        bottom = nextBottom;
+        right = nextRight;
+      }
+    }
+  }
+  const cells = [];
+  for (let row = top; row <= bottom; row += 1) {
+    for (let column = left; column <= right; column += 1) {
+      const cell = grid.matrix[row]?.[column];
+      if (cell && !cells.includes(cell)) cells.push(cell);
+    }
+  }
+  return cells;
+}
+
+function noteTableSelectionDetails(table = activeNoteTable, cells = activeNoteTableCells) {
+  if (!table?.isConnected || !cells.length) return null;
+  const grid = noteTableGrid(table);
+  const details = cells.map(cell => grid.meta.get(cell)).filter(Boolean);
+  if (!details.length) return null;
+  const top = Math.min(...details.map(item => item.row));
+  const left = Math.min(...details.map(item => item.column));
+  const bottom = Math.max(...details.map(item => item.row + item.rowspan - 1));
+  const right = Math.max(...details.map(item => item.column + item.colspan - 1));
+  const regionCells = [];
+  let complete = true;
+  for (let row = top; row <= bottom; row += 1) {
+    for (let column = left; column <= right; column += 1) {
+      const cell = grid.matrix[row]?.[column];
+      if (!cell) complete = false;
+      else if (!regionCells.includes(cell)) regionCells.push(cell);
+    }
+  }
+  const selected = new Set(cells);
+  const rectangular = complete
+    && regionCells.every(cell => selected.has(cell))
+    && cells.every(cell => regionCells.includes(cell));
+  return { grid, top, left, bottom, right, regionCells, rectangular };
+}
+
+function updateNoteTableToolbar() {
+  const details = noteTableSelectionDetails();
+  if (!details) return;
+  const rows = details.bottom - details.top + 1;
+  const columns = details.right - details.left + 1;
+  $('#noteTableSelectionSummary').textContent = activeNoteTableCells.length > 1
+    ? `${rows} 行 × ${columns} 列`
+    : `第 ${details.top + 1} 行 · 第 ${details.left + 1} 列`;
+  const actionButton = action => $(`#noteTableTools [data-note-table-action="${action}"]`);
+  actionButton('merge-cells').disabled = activeNoteTableCells.length < 2 || !details.rectangular;
+  actionButton('split-cells').disabled = !activeNoteTableCells.some(cell => cell.rowSpan > 1 || cell.colSpan > 1);
+  actionButton('equalize-columns').disabled = details.grid.columnCount < 2;
+  actionButton('equalize-rows').disabled = details.grid.rowCount < 2;
+  const rowHeaderButton = actionButton('toggle-row-header');
+  const columnHeaderButton = actionButton('toggle-column-header');
+  const rowHeaderFrozen = activeNoteTable?.dataset.freezeRowHeader === 'true';
+  const columnHeaderFrozen = activeNoteTable?.dataset.freezeColumnHeader === 'true';
+  rowHeaderButton.textContent = rowHeaderFrozen ? '取消固定行头' : '固定行头';
+  rowHeaderButton.setAttribute('aria-pressed', String(rowHeaderFrozen));
+  columnHeaderButton.textContent = columnHeaderFrozen ? '取消固定列头' : '固定列头';
+  columnHeaderButton.setAttribute('aria-pressed', String(columnHeaderFrozen));
+}
+
+function setNoteTableSelection(table, cells, { anchor = cells[0], focus = cells.at(-1) } = {}) {
+  activeNoteTable?.querySelectorAll('.active-cell, .selected-cell, .selection-anchor').forEach(cell => {
+    cell.classList.remove('active-cell', 'selected-cell', 'selection-anchor');
+    cell.removeAttribute('aria-selected');
+  });
+  activeNoteTable = table;
+  activeNoteTableCells = [...new Set(cells)].filter(cell => cell?.isConnected && cell.closest('table.note-table') === table);
+  activeNoteTableCell = focus?.isConnected ? focus : activeNoteTableCells[0] || null;
+  noteTableSelectionAnchor = anchor?.isConnected ? anchor : activeNoteTableCells[0] || null;
+  activeNoteTableCells.forEach(cell => {
+    cell.classList.add('selected-cell');
+    cell.setAttribute('aria-selected', 'true');
+  });
+  activeNoteTableCell?.classList.add('active-cell');
+  noteTableSelectionAnchor?.classList.add('selection-anchor');
+  if (!activeNoteTableCells.length) {
+    hideNoteTableTools();
+    return;
+  }
+  updateNoteTableToolbar();
+  positionNoteTableTools();
+}
+
+function hideNoteTableAxisHandles() {
+  noteTableHoverAxis = null;
+  ['#noteTableRowHandle', '#noteTableColumnHandle'].forEach(selector => {
+    const handle = $(selector);
+    handle.classList.remove('visible');
+    handle.hidden = true;
+  });
+}
+
+function positionNoteTableAxisHandles() {
+  const axis = noteTableHoverAxis;
+  if (!axis?.table?.isConnected || currentWorkspaceView !== 'notes') {
+    hideNoteTableAxisHandles();
+    return;
+  }
+  const grid = noteTableGrid(axis.table);
+  const row = grid.rows[axis.row];
+  if (!row || axis.column < 0 || axis.column >= grid.columnCount) {
+    hideNoteTableAxisHandles();
+    return;
+  }
+  const tableRect = axis.table.getBoundingClientRect();
+  const rowRect = row.getBoundingClientRect();
+  const documentRect = $('.note-document').getBoundingClientRect();
+  const rowHandle = $('#noteTableRowHandle');
+  const columnHandle = $('#noteTableColumnHandle');
+  const showRow = axis.axes !== 'column';
+  const showColumn = axis.axes !== 'row';
+  rowHandle.hidden = !showRow;
+  columnHandle.hidden = !showColumn;
+  const columnMetrics = noteTableColumnMetrics(axis.table, axis.column);
+  rowHandle.style.left = `${Math.max(documentRect.left + 2, tableRect.left - 20)}px`;
+  rowHandle.style.top = `${rowRect.top}px`;
+  rowHandle.style.width = `${Math.min(20, Math.max(0, tableRect.left - documentRect.left - 2))}px`;
+  rowHandle.style.height = `${rowRect.height}px`;
+  columnHandle.style.left = `${columnMetrics.left}px`;
+  columnHandle.style.top = `${tableRect.top - 20}px`;
+  columnHandle.style.width = `${columnMetrics.width}px`;
+  columnHandle.style.height = '20px';
+  rowHandle.setAttribute('aria-label', `选择或拖动第 ${axis.row + 1} 行`);
+  rowHandle.title = `点击选择，拖动调整第 ${axis.row + 1} 行顺序`;
+  columnHandle.setAttribute('aria-label', `选择或拖动第 ${axis.column + 1} 列`);
+  columnHandle.title = `点击选择，拖动调整第 ${axis.column + 1} 列顺序`;
+  requestAnimationFrame(() => {
+    rowHandle.classList.toggle('visible', showRow);
+    columnHandle.classList.toggle('visible', showColumn);
+  });
+}
+
+function setNoteTableHoverAxis(table, row, column, axes = 'both') {
+  if (noteTableHoverAxis?.table === table && noteTableHoverAxis.row === row && noteTableHoverAxis.column === column && noteTableHoverAxis.axes === axes) return;
+  noteTableHoverAxis = { table, row, column, axes };
+  positionNoteTableAxisHandles();
+}
+
+function showNoteTableAxisHandles(cell, clientX, clientY) {
+  const table = cell?.closest?.('table.note-table');
+  if (!table) {
+    hideNoteTableAxisHandles();
+    return;
+  }
+  const grid = noteTableGrid(table);
+  let rowIndex = grid.rows.findIndex(row => {
+    const rect = row.getBoundingClientRect();
+    return clientY >= rect.top && clientY <= rect.bottom;
+  });
+  if (rowIndex < 0) rowIndex = grid.meta.get(cell)?.row ?? 0;
+  setNoteTableHoverAxis(table, rowIndex, noteTableColumnIndexAtX(table, clientX), 'both');
+}
+
+function showNoteTableAxisHandlesFromOuterZone(clientX, clientY) {
+  const table = [...document.querySelectorAll('#noteEditor table.note-table')].find(candidate => {
+    const rect = candidate.getBoundingClientRect();
+    const inLeftZone = clientX >= rect.left - 20 && clientX <= rect.left && clientY >= rect.top && clientY <= rect.bottom;
+    const inTopZone = clientY >= rect.top - 20 && clientY <= rect.top && clientX >= rect.left && clientX <= rect.right;
+    return inLeftZone || inTopZone;
+  });
+  if (!table) return false;
+  const rect = table.getBoundingClientRect();
+  if (clientX < rect.left) {
+    const grid = noteTableGrid(table);
+    let rowIndex = grid.rows.findIndex(row => {
+      const rowRect = row.getBoundingClientRect();
+      return clientY >= rowRect.top && clientY <= rowRect.bottom;
+    });
+    if (rowIndex < 0) rowIndex = Math.max(0, grid.rowCount - 1);
+    setNoteTableHoverAxis(table, rowIndex, 0, 'row');
+  } else setNoteTableHoverAxis(table, 0, noteTableColumnIndexAtX(table, clientX), 'column');
+  return true;
+}
+
+function hideNoteTableInsertHandles() {
+  noteTableInsertBoundary = null;
+  $('#noteTableInsertRowHandle').hidden = true;
+  $('#noteTableInsertColumnHandle').hidden = true;
+}
+
+function positionNoteTableInsertHandles() {
+  const state = noteTableInsertBoundary;
+  if (!state?.table?.isConnected || currentWorkspaceView !== 'notes') {
+    hideNoteTableInsertHandles();
+    return;
+  }
+  const tableRect = state.table.getBoundingClientRect();
+  const grid = noteTableGrid(state.table);
+  const rowHandle = $('#noteTableInsertRowHandle');
+  const columnHandle = $('#noteTableInsertColumnHandle');
+  rowHandle.hidden = state.rowBoundary === null;
+  columnHandle.hidden = state.columnBoundary === null;
+  if (state.rowBoundary !== null) {
+    const boundaryY = state.rowBoundary <= 0
+      ? tableRect.top
+      : grid.rows[Math.min(state.rowBoundary - 1, grid.rows.length - 1)]?.getBoundingClientRect().bottom;
+    rowHandle.style.left = `${tableRect.left - 12}px`;
+    rowHandle.style.top = `${boundaryY - 12}px`;
+    rowHandle.setAttribute('aria-label', `在第 ${state.rowBoundary} 行后增加一行`);
+  }
+  if (state.columnBoundary !== null) {
+    const widths = noteTableColumnWidths(state.table);
+    const edgePercent = widths.slice(0, state.columnBoundary).reduce((sum, width) => sum + width, 0);
+    const boundaryX = tableRect.left + edgePercent / 100 * tableRect.width;
+    columnHandle.style.left = `${boundaryX - 12}px`;
+    columnHandle.style.top = `${tableRect.top - 12}px`;
+    columnHandle.setAttribute('aria-label', `在第 ${state.columnBoundary} 列后增加一列`);
+  }
+}
+
+function showNoteTableInsertHandles(cell, clientX, clientY) {
+  const table = cell?.closest?.('table.note-table');
+  if (!table) {
+    hideNoteTableInsertHandles();
+    return false;
+  }
+  const grid = noteTableGrid(table);
+  const details = grid.meta.get(cell);
+  if (!details) return false;
+  const rect = cell.getBoundingClientRect();
+  const threshold = 7;
+  const topDistance = Math.abs(clientY - rect.top);
+  const bottomDistance = Math.abs(clientY - rect.bottom);
+  const leftDistance = Math.abs(clientX - rect.left);
+  const rightDistance = Math.abs(clientX - rect.right);
+  const rowBoundary = Math.min(topDistance, bottomDistance) <= threshold
+    ? (topDistance <= bottomDistance ? details.row : details.row + details.rowspan)
+    : null;
+  const columnBoundary = Math.min(leftDistance, rightDistance) <= threshold
+    ? (leftDistance <= rightDistance ? details.column : details.column + details.colspan)
+    : null;
+  if (rowBoundary === null && columnBoundary === null) {
+    hideNoteTableInsertHandles();
+    return false;
+  }
+  noteTableInsertBoundary = { table, rowBoundary, columnBoundary };
+  positionNoteTableInsertHandles();
+  return true;
+}
+
+function showNoteTableInsertHandlesFromOuterZone(clientX, clientY) {
+  const table = [...document.querySelectorAll('#noteEditor table.note-table')].find(candidate => {
+    const rect = candidate.getBoundingClientRect();
+    return (clientX >= rect.left - 18 && clientX <= rect.left + 7 && clientY >= rect.top - 7 && clientY <= rect.bottom + 7)
+      || (clientY >= rect.top - 18 && clientY <= rect.top + 7 && clientX >= rect.left - 7 && clientX <= rect.right + 7);
+  });
+  if (!table) return false;
+  const tableRect = table.getBoundingClientRect();
+  const grid = noteTableGrid(table);
+  let rowBoundary = null;
+  let rowDistance = Infinity;
+  [tableRect.top, ...grid.rows.map(row => row.getBoundingClientRect().bottom)].forEach((coordinate, boundary) => {
+    const distance = Math.abs(clientY - coordinate);
+    if (distance < rowDistance && distance <= 7) {
+      rowDistance = distance;
+      rowBoundary = boundary;
+    }
+  });
+  const widths = noteTableColumnWidths(table);
+  let columnBoundary = null;
+  let columnDistance = Infinity;
+  let accumulated = 0;
+  [0, ...widths].forEach((width, boundary) => {
+    if (boundary > 0) accumulated += width;
+    const coordinate = tableRect.left + accumulated / 100 * tableRect.width;
+    const distance = Math.abs(clientX - coordinate);
+    if (distance < columnDistance && distance <= 7) {
+      columnDistance = distance;
+      columnBoundary = boundary;
+    }
+  });
+  if (clientX < tableRect.left) columnBoundary = null;
+  if (clientY < tableRect.top) rowBoundary = null;
+  if (rowBoundary === null && columnBoundary === null) return false;
+  noteTableInsertBoundary = { table, rowBoundary, columnBoundary };
+  positionNoteTableInsertHandles();
+  return true;
+}
+
+function insertNoteTableAtBoundary(type) {
+  const state = noteTableInsertBoundary;
+  if (!state?.table?.isConnected) return;
+  const table = state.table;
+  const grid = noteTableGrid(table);
+  captureNoteHistory('');
+  let nextCell = null;
+  if (type === 'row' && state.rowBoundary !== null) {
+    const boundary = Math.max(0, Math.min(state.rowBoundary, grid.rowCount));
+    const newRow = document.createElement('tr');
+    const expandedCells = new Set();
+    for (let column = 0; column < Math.max(1, grid.columnCount); column += 1) {
+      const coveringCell = boundary > 0 ? grid.matrix[boundary - 1]?.[column] : null;
+      const coveringDetails = grid.meta.get(coveringCell);
+      const crossesBoundary = coveringDetails
+        && coveringDetails.row < boundary
+        && coveringDetails.row + coveringDetails.rowspan > boundary;
+      if (crossesBoundary) {
+        if (!expandedCells.has(coveringCell)) coveringCell.rowSpan += 1;
+        expandedCells.add(coveringCell);
+        nextCell ||= coveringCell;
+        continue;
+      }
+      const newCell = newRow.insertCell();
+      newCell.innerHTML = '<br>';
+      nextCell ||= newCell;
+    }
+    const beforeRow = grid.rows[boundary];
+    if (beforeRow) beforeRow.before(newRow);
+    else (table.tBodies[0] || table).append(newRow);
+    showToast('已增加一行');
+  } else if (type === 'column' && state.columnBoundary !== null) {
+    const boundary = Math.max(0, Math.min(state.columnBoundary, grid.columnCount));
+    insertNoteTableColumnDefinition(table, boundary);
+    const expandedCells = new Set();
+    grid.rows.forEach((row, rowIndex) => {
+      const coveringCell = grid.matrix[rowIndex]?.[boundary];
+      const coveringDetails = grid.meta.get(coveringCell);
+      if (coveringCell && coveringDetails?.column < boundary) {
+        if (!expandedCells.has(coveringCell)) coveringCell.colSpan += 1;
+        expandedCells.add(coveringCell);
+        return;
+      }
+      const before = [...row.cells].find(candidate => (grid.meta.get(candidate)?.column ?? Infinity) >= boundary);
+      const newCell = document.createElement('td');
+      newCell.innerHTML = '<br>';
+      row.insertBefore(newCell, before || null);
+      nextCell ||= newCell;
+    });
+    showToast('已增加一列');
+  }
+  hideNoteTableInsertHandles();
+  scheduleNoteSave();
+  if (nextCell) focusNoteTableCell(nextCell);
+}
+
+function selectHoveredNoteTableAxis(type) {
+  const axis = noteTableHoverAxis;
+  if (!axis?.table?.isConnected) return;
+  const grid = noteTableGrid(axis.table);
+  const axisCells = type === 'row'
+    ? [...new Set(grid.matrix[axis.row]?.filter(Boolean) || [])]
+    : [...new Set(grid.matrix.map(row => row[axis.column]).filter(Boolean))];
+  if (!axisCells.length) return;
+  const cells = noteTableCellsBetween(axis.table, axisCells[0], axisCells.at(-1));
+  setNoteTableSelection(axis.table, cells, { anchor: cells[0], focus: cells.at(-1) });
+}
+
+function noteTableHasMergedCells(table) {
+  return [...table.querySelectorAll('td, th')].some(cell => cell.rowSpan > 1 || cell.colSpan > 1);
+}
+
+function normalizeNoteTableColumnDefinitions(group) {
+  const columns = [...group.children];
+  const fallback = 100 / Math.max(1, columns.length);
+  const widths = columns.map(column => Number.parseFloat(column.style.width) || fallback);
+  const total = widths.reduce((sum, width) => sum + width, 0) || 100;
+  columns.forEach((column, index) => { column.style.width = `${widths[index] / total * 100}%`; });
+  return columns;
+}
+
+function ensureNoteTableColumnDefinitions(table) {
+  const columnCount = noteTableGrid(table).columnCount;
+  let group = table.querySelector(':scope > colgroup');
+  if (!group) {
+    group = document.createElement('colgroup');
+    table.insertBefore(group, table.firstChild);
+  }
+  const previousWidths = [...group.children].map(column => Number.parseFloat(column.style.width)).filter(Number.isFinite);
+  if (group.children.length !== columnCount) {
+    group.replaceChildren();
+    const fallback = 100 / Math.max(1, columnCount);
+    for (let index = 0; index < columnCount; index += 1) {
+      const column = document.createElement('col');
+      column.style.width = `${previousWidths[index] || fallback}%`;
+      group.append(column);
+    }
+  }
+  return normalizeNoteTableColumnDefinitions(group);
+}
+
+function insertNoteTableColumnDefinition(table, index) {
+  const group = table.querySelector(':scope > colgroup');
+  if (!group) return;
+  const columns = [...group.children];
+  const neighbor = columns[Math.min(index, columns.length - 1)];
+  const width = Number.parseFloat(neighbor?.style.width) || 100 / Math.max(1, columns.length);
+  if (neighbor) neighbor.style.width = `${width / 2}%`;
+  const column = document.createElement('col');
+  column.style.width = `${width / 2}%`;
+  group.insertBefore(column, columns[index] || null);
+  normalizeNoteTableColumnDefinitions(group);
+}
+
+function deleteNoteTableColumnDefinition(table, index) {
+  const group = table.querySelector(':scope > colgroup');
+  if (!group) return;
+  group.children[index]?.remove();
+  if (!group.children.length) group.remove();
+  else normalizeNoteTableColumnDefinitions(group);
+}
+
+function noteTableOuterResizeCandidateAtPoint(clientX, clientY) {
+  const threshold = 12;
+  const tables = [...document.querySelectorAll('#noteEditor table.note-table')];
+  for (const table of tables) {
+    const rect = table.getBoundingClientRect();
+    if (clientX < rect.left - threshold || clientX > rect.right + threshold || clientY < rect.top || clientY > rect.bottom + threshold) continue;
+    const grid = noteTableGrid(table);
+    const rowBoundaries = [rect.top, ...grid.rows.map(row => row.getBoundingClientRect().bottom)];
+    const widths = noteTableColumnWidths(table);
+    let accumulated = 0;
+    const columnBoundaries = [rect.left, ...widths.map(width => {
+      accumulated += width;
+      return rect.left + accumulated / 100 * rect.width;
+    })];
+    const nearRowIntersection = rowBoundaries.some(value => Math.abs(clientY - value) <= 8);
+    const nearColumnIntersection = columnBoundaries.some(value => Math.abs(clientX - value) <= 8);
+    const candidates = [];
+    if (!nearRowIntersection && Math.abs(clientX - rect.left) <= threshold) candidates.push({ table, type: 'width', edge: 'left', distance: Math.abs(clientX - rect.left) });
+    if (!nearRowIntersection && Math.abs(clientX - rect.right) <= threshold) candidates.push({ table, type: 'width', edge: 'right', distance: Math.abs(clientX - rect.right) });
+    if (!nearColumnIntersection && Math.abs(clientY - rect.bottom) <= threshold) candidates.push({ table, type: 'height', edge: 'bottom', distance: Math.abs(clientY - rect.bottom) });
+    if (candidates.length) return candidates.sort((a, b) => a.distance - b.distance)[0];
+  }
+  return null;
+}
+
+function clearNoteTableOuterResizeCandidate() {
+  noteTableOuterResizeCandidate = null;
+  if (!noteTableOuterResizeState) {
+    document.body.classList.remove('hovering-note-table-width-resize', 'hovering-note-table-height-resize');
+    if (!noteTableResizeCandidate && !noteTableResizeState) $('#noteTableResizeGuide').hidden = true;
+  }
+}
+
+function setNoteTableOuterResizeCandidate(candidate) {
+  noteTableOuterResizeCandidate = candidate;
+  document.body.classList.toggle('hovering-note-table-width-resize', candidate?.type === 'width');
+  document.body.classList.toggle('hovering-note-table-height-resize', candidate?.type === 'height');
+  if (!candidate) return;
+  const rect = candidate.table.getBoundingClientRect();
+  positionNoteTableResizeGuide(candidate.type === 'width' ? 'column' : 'row', candidate.type === 'width' ? rect[candidate.edge] : rect.bottom, candidate.table);
+}
+
+function startNoteTableOuterResize(candidate, event) {
+  if (!candidate || event.button !== 0) return false;
+  const tableRect = candidate.table.getBoundingClientRect();
+  const editorRect = $('#noteEditor').getBoundingClientRect();
+  const documentRect = $('.note-document').getBoundingClientRect();
+  const grid = noteTableGrid(candidate.table);
+  noteTableOuterResizeState = {
+    ...candidate,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    tableRect,
+    editorRect,
+    documentRect,
+    rowHeights: grid.rows.map(row => row.getBoundingClientRect().height),
+    snapActive: candidate.type === 'width' && Math.abs(
+      tableRect[candidate.edge] - (candidate.edge === 'left'
+        ? Math.max(2, documentRect.left + 2)
+        : Math.min(window.innerWidth - 2, documentRect.right - 2))
+    ) <= 2
+  };
+  captureNoteHistory('');
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  document.body.classList.add(candidate.type === 'width' ? 'resizing-note-table-width' : 'resizing-note-table-height');
+  hideNoteTableInsertHandles();
+  hideNoteTableAxisHandles();
+  hideNoteTableContentDragHandle();
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  return true;
+}
+
+function leftAlignNoteTablesInContentLane() {
+  $$('#noteEditor table.note-table').forEach(table => {
+    table.style.marginLeft = '0';
+  });
+}
+
+function updateNoteTableOuterResize(event) {
+  const state = noteTableOuterResizeState;
+  if (!state || event.pointerId !== state.pointerId) return false;
+  event.preventDefault();
+  if (state.type === 'width') {
+    const minWidth = Math.min(320, state.editorRect.width);
+    const canvasLeft = Math.max(2, state.documentRect.left + 2);
+    const maxWidth = Math.max(minWidth, state.editorRect.width * 3);
+    const snapThreshold = state.snapActive ? 6 : 18;
+    const snapLeft = canvasLeft;
+    const snapRight = Math.min(window.innerWidth - 2, state.documentRect.right - 2);
+    let snapped = false;
+    let left = state.tableRect.left;
+    let width = state.tableRect.width;
+    if (state.edge === 'left') {
+      left = Math.max(canvasLeft, Math.min(state.tableRect.right - minWidth, state.tableRect.left + event.clientX - state.startX));
+      width = state.tableRect.right - left;
+      if (Math.abs(left - snapLeft) <= snapThreshold) {
+        left = snapLeft;
+        width = state.tableRect.right - left;
+        snapped = true;
+      }
+    } else {
+      width = Math.max(minWidth, Math.min(maxWidth, state.tableRect.width + event.clientX - state.startX));
+      if (Math.abs(left + width - snapRight) <= snapThreshold) {
+        width = snapRight - left;
+        snapped = true;
+      }
+    }
+    state.snapActive = snapped;
+    state.table.style.width = `${width / Math.max(1, state.editorRect.width) * 100}%`;
+    state.table.style.marginLeft = `${(left - state.editorRect.left) / Math.max(1, state.editorRect.width) * 100}%`;
+    positionNoteTableResizeGuide('column', state.edge === 'left' ? left : left + width, state.table, { snap: snapped, bounds: state.documentRect });
+  } else {
+    const requestedHeight = Math.max(state.rowHeights.length * 43, state.tableRect.height + event.clientY - state.startY);
+    const scale = requestedHeight / Math.max(1, state.tableRect.height);
+    const rows = noteTableGrid(state.table).rows;
+    rows.forEach((row, index) => [...row.cells].forEach(cell => { cell.style.height = `${Math.max(43, Math.round(state.rowHeights[index] * scale))}px`; }));
+    positionNoteTableResizeGuide('row', state.table.getBoundingClientRect().bottom, state.table);
+  }
+  return true;
+}
+
+function finishNoteTableOuterResize(event, { cancelled = false } = {}) {
+  const state = noteTableOuterResizeState;
+  if (!state || (event && event.pointerId !== state.pointerId)) return false;
+  noteTableOuterResizeState = null;
+  noteTableOuterResizeCandidate = null;
+  $('#noteTableResizeGuide').hidden = true;
+  document.body.classList.remove('hovering-note-table-width-resize', 'hovering-note-table-height-resize', 'resizing-note-table-width', 'resizing-note-table-height');
+  positionNoteTableTools();
+  if (!cancelled) scheduleNoteSave();
+  return true;
+}
+
+function clearNoteTableResizeCandidate() {
+  noteTableResizeCandidate?.cell?.classList.remove('table-column-resize-left', 'table-column-resize-right', 'table-row-resize-top', 'table-row-resize-bottom');
+  noteTableResizeCandidate = null;
+  if (!noteTableResizeState && !noteTableOuterResizeCandidate && !noteTableOuterResizeState) $('#noteTableResizeGuide').hidden = true;
+}
+
+function noteTableResizeCandidateAtPoint(cell, clientX, clientY) {
+  const table = cell?.closest?.('table.note-table');
+  if (!table) return null;
+  const grid = noteTableGrid(table);
+  const details = grid.meta.get(cell);
+  if (!details) return null;
+  const rect = cell.getBoundingClientRect();
+  const threshold = 6;
+  const candidates = [];
+  const leftDistance = Math.abs(clientX - rect.left);
+  const rightDistance = Math.abs(clientX - rect.right);
+  const topDistance = Math.abs(clientY - rect.top);
+  const bottomDistance = Math.abs(clientY - rect.bottom);
+  if (leftDistance <= threshold && details.column > 0) candidates.push({ type: 'column', edge: 'left', boundary: details.column, distance: leftDistance });
+  if (rightDistance <= threshold && details.column + details.colspan < grid.columnCount) candidates.push({ type: 'column', edge: 'right', boundary: details.column + details.colspan, distance: rightDistance });
+  if (topDistance <= threshold && details.row > 0) candidates.push({ type: 'row', edge: 'top', row: details.row - 1, distance: topDistance });
+  if (bottomDistance <= threshold) candidates.push({ type: 'row', edge: 'bottom', row: details.row + details.rowspan - 1, distance: bottomDistance });
+  const closest = candidates.sort((a, b) => a.distance - b.distance)[0];
+  return closest ? { ...closest, table, cell } : null;
+}
+
+function setNoteTableResizeCandidate(candidate) {
+  if (noteTableResizeCandidate?.cell === candidate?.cell && noteTableResizeCandidate?.type === candidate?.type && noteTableResizeCandidate?.edge === candidate?.edge) {
+    noteTableResizeCandidate = candidate;
+    positionNoteTableResizeCandidateGuide(candidate);
+    return;
+  }
+  clearNoteTableResizeCandidate();
+  noteTableResizeCandidate = candidate;
+  if (!candidate) return;
+  candidate.cell.classList.add(`table-${candidate.type}-resize-${candidate.edge}`);
+  positionNoteTableResizeCandidateGuide(candidate);
+}
+
+function positionNoteTableResizeCandidateGuide(candidate) {
+  if (!candidate?.table?.isConnected || noteTableResizeState) return;
+  if (candidate.type === 'row') {
+    const row = noteTableGrid(candidate.table).rows[candidate.row];
+    if (row) positionNoteTableResizeGuide('row', row.getBoundingClientRect().bottom, candidate.table);
+    return;
+  }
+  const widths = noteTableColumnWidths(candidate.table);
+  const tableRect = candidate.table.getBoundingClientRect();
+  const edgePercent = widths.slice(0, candidate.boundary).reduce((sum, width) => sum + width, 0);
+  positionNoteTableResizeGuide('column', tableRect.left + edgePercent / 100 * tableRect.width, candidate.table);
+}
+
+function positionNoteTableResizeGuide(type, coordinate, table, { snap = false, bounds = null } = {}) {
+  const guide = $('#noteTableResizeGuide');
+  const tableRect = table.getBoundingClientRect();
+  const guideRect = snap && bounds ? bounds : tableRect;
+  guide.hidden = false;
+  guide.className = `note-table-resize-guide ${type}${snap ? ' snap-target' : ''}`;
+  if (type === 'column') {
+    guide.style.left = `${coordinate - 1}px`;
+    guide.style.top = `${guideRect.top}px`;
+    guide.style.width = '2px';
+    guide.style.height = `${guideRect.height}px`;
+  } else {
+    guide.style.left = `${guideRect.left}px`;
+    guide.style.top = `${coordinate - 1}px`;
+    guide.style.width = `${guideRect.width}px`;
+    guide.style.height = '2px';
+  }
+}
+
+function startNoteTableResize(candidate, event) {
+  if (!candidate?.table?.isConnected) return false;
+  const tableRect = candidate.table.getBoundingClientRect();
+  captureNoteHistory('');
+  if (candidate.type === 'column') {
+    const columns = ensureNoteTableColumnDefinitions(candidate.table);
+    const widths = columns.map(column => Number.parseFloat(column.style.width));
+    const leftIndex = candidate.boundary - 1;
+    const rightIndex = candidate.boundary;
+    noteTableResizeState = {
+      ...candidate,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      tableWidth: tableRect.width,
+      columns,
+      widths,
+      leftIndex,
+      rightIndex,
+      minPercent: Math.min(24, 72 / Math.max(1, tableRect.width) * 100)
+    };
+    positionNoteTableResizeGuide('column', event.clientX, candidate.table);
+  } else {
+    const row = noteTableGrid(candidate.table).rows[candidate.row];
+    if (!row) return false;
+    noteTableResizeState = {
+      ...candidate,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      targetRow: row,
+      startHeight: row.getBoundingClientRect().height
+    };
+    positionNoteTableResizeGuide('row', row.getBoundingClientRect().bottom, candidate.table);
+  }
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  document.body.classList.add(`resizing-note-table-${candidate.type}`);
+  hideNoteTableInsertHandles();
+  hideNoteTableAxisHandles();
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  return true;
+}
+
+function updateNoteTableResize(event) {
+  const state = noteTableResizeState;
+  if (!state || event.pointerId !== state.pointerId) return false;
+  event.preventDefault();
+  if (state.type === 'column') {
+    const rawDelta = (event.clientX - state.startX) / Math.max(1, state.tableWidth) * 100;
+    const minDelta = state.minPercent - state.widths[state.leftIndex];
+    const maxDelta = state.widths[state.rightIndex] - state.minPercent;
+    const delta = Math.max(minDelta, Math.min(maxDelta, rawDelta));
+    state.columns[state.leftIndex].style.width = `${state.widths[state.leftIndex] + delta}%`;
+    state.columns[state.rightIndex].style.width = `${state.widths[state.rightIndex] - delta}%`;
+    positionNoteTableResizeGuide('column', state.startX + delta / 100 * state.tableWidth, state.table);
+  } else {
+    const height = Math.max(43, Math.round(state.startHeight + event.clientY - state.startY));
+    [...state.targetRow.cells].forEach(cell => { cell.style.height = `${height}px`; });
+    positionNoteTableResizeGuide('row', state.targetRow.getBoundingClientRect().bottom, state.table);
+  }
+  return true;
+}
+
+function finishNoteTableResize(event) {
+  const state = noteTableResizeState;
+  if (!state || (event && event.pointerId !== state.pointerId)) return false;
+  noteTableResizeState = null;
+  $('#noteTableResizeGuide').hidden = true;
+  document.body.classList.remove('resizing-note-table-column', 'resizing-note-table-row');
+  clearNoteTableResizeCandidate();
+  positionNoteTableTools();
+  scheduleNoteSave();
+  return true;
+}
+
+function noteTableCellHasMovableContent(cell) {
+  if (!cell?.isConnected) return false;
+  return Boolean(cell.textContent?.trim() || cell.querySelector('img, figure, table, hr, blockquote, pre, ul, ol'));
+}
+
+function noteTableContentOwnsPointer(target) {
+  return Boolean(target?.closest?.('figure img, figcaption, a, button, input, textarea, select, video, audio'));
+}
+
+function positionNoteTableContentDragHandle() {
+  const cell = noteTableContentHandleCell;
+  const handle = $('#noteTableContentDragHandle');
+  if (!cell?.isConnected || currentWorkspaceView !== 'notes' || !noteTableCellHasMovableContent(cell) || noteTableContentDragState) {
+    handle.hidden = true;
+    return;
+  }
+  const rect = cell.getBoundingClientRect();
+  handle.hidden = false;
+  handle.style.left = `${rect.right - 25}px`;
+  handle.style.top = `${rect.top + 4}px`;
+  handle.setAttribute('aria-label', `拖动交换第 ${cell.parentElement.rowIndex + 1} 行第 ${cell.cellIndex + 1} 列的内容`);
+}
+
+function showNoteTableContentDragHandle(cell) {
+  if (!noteTableCellHasMovableContent(cell) || noteTableResizeCandidate || noteTableResizeState || noteTableAxisDragState) {
+    hideNoteTableContentDragHandle();
+    return;
+  }
+  noteTableContentHandleCell = cell;
+  positionNoteTableContentDragHandle();
+}
+
+function hideNoteTableContentDragHandle() {
+  if (noteTableContentDragState) return;
+  noteTableContentHandleCell = null;
+  $('#noteTableContentDragHandle').hidden = true;
+}
+
+function setNoteTableContentDropTarget(state, target) {
+  state.targetCell?.classList.remove('note-table-content-drop-target');
+  state.targetCell = target && target !== state.sourceCell && target.closest('table.note-table') === state.table ? target : null;
+  state.targetCell?.classList.add('note-table-content-drop-target');
+}
+
+function createNoteTableContentDragGhost(state, event) {
+  const ghost = $('#noteTableContentDragGhost');
+  const rect = state.sourceCell.getBoundingClientRect();
+  ghost.innerHTML = state.sourceCell.innerHTML;
+  ghost.hidden = false;
+  ghost.style.width = `${Math.min(320, Math.max(120, rect.width))}px`;
+  ghost.style.height = `${Math.min(340, Math.max(54, rect.height))}px`;
+  ghost.style.left = `${event.clientX + 14}px`;
+  ghost.style.top = `${event.clientY + 14}px`;
+  state.sourceCell.classList.add('note-table-content-drag-source');
+}
+
+function startNoteTableContentDrag(cell, event) {
+  if (!noteTableCellHasMovableContent(cell) || event.button !== 0) return;
+  noteTableContentDragState = {
+    pointerId: event.pointerId,
+    table: cell.closest('table.note-table'),
+    sourceCell: cell,
+    targetCell: null,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false
+  };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function updateNoteTableContentDrag(event) {
+  const state = noteTableContentDragState;
+  if (!state || event.pointerId !== state.pointerId) return false;
+  const distance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY);
+  if (!state.active && distance < 5) return true;
+  event.preventDefault();
+  if (!state.active) {
+    state.active = true;
+    noteTableSuppressClick = true;
+    $('#noteTableContentDragHandle').hidden = true;
+    $('#noteTableTools').hidden = true;
+    document.body.classList.add('dragging-note-table-content');
+    window.getSelection()?.removeAllRanges();
+    createNoteTableContentDragGhost(state, event);
+  }
+  const ghost = $('#noteTableContentDragGhost');
+  ghost.style.left = `${event.clientX + 14}px`;
+  ghost.style.top = `${event.clientY + 14}px`;
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('#noteEditor td, #noteEditor th');
+  setNoteTableContentDropTarget(state, target);
+  return true;
+}
+
+function swapNoteTableCellContents(source, target) {
+  if (!source?.isConnected || !target?.isConnected || source === target || source.closest('table.note-table') !== target.closest('table.note-table')) return false;
+  captureNoteHistory('');
+  const sourceHTML = source.innerHTML;
+  const targetHTML = target.innerHTML;
+  source.innerHTML = targetHTML?.trim() ? targetHTML : '<br>';
+  target.innerHTML = sourceHTML?.trim() ? sourceHTML : '<br>';
+  prepareNoteImages();
+  ensureNoteFigureCaptions();
+  normalizeEditedNoteImageGrids();
+  requestAnimationFrame(syncAllNoteImageGridLayouts);
+  setNoteTableSelection(target.closest('table.note-table'), [target], { anchor: target, focus: target });
+  scheduleNoteSave();
+  showToast(noteTableCellHasMovableContent(source) ? '单元格内容已交换' : '单元格内容已移动');
+  return true;
+}
+
+function clearNoteTableContentDrag(state = noteTableContentDragState) {
+  state?.sourceCell?.classList.remove('note-table-content-drag-source');
+  state?.targetCell?.classList.remove('note-table-content-drop-target');
+  const ghost = $('#noteTableContentDragGhost');
+  ghost.hidden = true;
+  ghost.replaceChildren();
+  ghost.removeAttribute('style');
+  document.body.classList.remove('dragging-note-table-content');
+}
+
+function finishNoteTableContentDrag(event, { cancelled = false } = {}) {
+  const state = noteTableContentDragState;
+  if (!state || (event && event.pointerId !== state.pointerId)) return false;
+  noteTableContentDragState = null;
+  const shouldSwap = !cancelled && state.active && state.targetCell;
+  if (shouldSwap) swapNoteTableCellContents(state.sourceCell, state.targetCell);
+  else if (state.active) positionNoteTableTools();
+  clearNoteTableContentDrag(state);
+  noteTableContentHandleCell = null;
+  setTimeout(() => { noteTableSuppressClick = false; }, 0);
+  return true;
+}
+
+function noteTableColumnWidths(table) {
+  const grid = noteTableGrid(table);
+  const columns = table.querySelectorAll(':scope > colgroup > col');
+  return columns.length === grid.columnCount
+    ? [...columns].map(column => Number.parseFloat(column.style.width) || 0)
+    : Array(grid.columnCount).fill(100 / Math.max(1, grid.columnCount));
+}
+
+function noteTableColumnMetrics(table, columnIndex) {
+  const rect = table.getBoundingClientRect();
+  const widths = noteTableColumnWidths(table);
+  const leftPercent = widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
+  return {
+    left: rect.left + leftPercent / 100 * rect.width,
+    width: (widths[columnIndex] || 0) / 100 * rect.width
+  };
+}
+
+function noteTableColumnIndexAtX(table, clientX) {
+  const grid = noteTableGrid(table);
+  const rect = table.getBoundingClientRect();
+  const widths = noteTableColumnWidths(table);
+  const relative = Math.max(0, Math.min(rect.width - 1, clientX - rect.left));
+  let edge = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    edge += widths[index] / 100 * rect.width;
+    if (relative < edge) return index;
+  }
+  return Math.max(0, grid.columnCount - 1);
+}
+
+function positionNoteTableDropIndicator(state) {
+  const indicator = $('#noteTableDropIndicator');
+  const tableRect = state.table.getBoundingClientRect();
+  indicator.hidden = false;
+  indicator.className = `note-table-drop-indicator ${state.type}`;
+  if (state.type === 'row') {
+    const rowRect = noteTableGrid(state.table).rows[state.targetIndex].getBoundingClientRect();
+    const y = state.targetIndex > state.fromIndex ? rowRect.bottom : rowRect.top;
+    indicator.style.left = `${tableRect.left}px`;
+    indicator.style.top = `${y - 1}px`;
+    indicator.style.width = `${tableRect.width}px`;
+    indicator.style.height = '2px';
+  } else {
+    const grid = noteTableGrid(state.table);
+    const columns = state.table.querySelectorAll(':scope > colgroup > col');
+    const widths = columns.length === grid.columnCount
+      ? [...columns].map(column => Number.parseFloat(column.style.width) || 0)
+      : Array(grid.columnCount).fill(100 / Math.max(1, grid.columnCount));
+    const edgePercent = widths.slice(0, state.targetIndex + (state.targetIndex > state.fromIndex ? 1 : 0)).reduce((sum, width) => sum + width, 0);
+    indicator.style.left = `${tableRect.left + edgePercent / 100 * tableRect.width - 1}px`;
+    indicator.style.top = `${tableRect.top}px`;
+    indicator.style.width = '2px';
+    indicator.style.height = `${tableRect.height}px`;
+  }
+}
+
+function createNoteTableDragGhost(state) {
+  const ghost = $('#noteTableDragGhost');
+  const grid = noteTableGrid(state.table);
+  const tableRect = state.table.getBoundingClientRect();
+  const cells = state.type === 'row'
+    ? [...grid.rows[state.fromIndex].cells]
+    : grid.rows.map((row, rowIndex) => grid.matrix[rowIndex][state.fromIndex]);
+  const cellRects = cells.map(cell => cell.getBoundingClientRect());
+  ghost.replaceChildren(...cells.map(cell => {
+    const clone = document.createElement('div');
+    clone.className = 'note-table-drag-ghost-cell';
+    clone.innerHTML = cell.innerHTML;
+    return clone;
+  }));
+  ghost.className = `note-table-drag-ghost ${state.type}`;
+  ghost.hidden = false;
+  if (state.type === 'row') {
+    const rowRect = grid.rows[state.fromIndex].getBoundingClientRect();
+    ghost.style.left = `${tableRect.left}px`;
+    ghost.style.top = `${rowRect.top}px`;
+    ghost.style.width = `${tableRect.width}px`;
+    ghost.style.height = `${rowRect.height}px`;
+    ghost.style.gridTemplateColumns = cellRects.map(rect => `${rect.width}px`).join(' ');
+    ghost.style.gridTemplateRows = '1fr';
+    state.ghostOffset = state.startY - rowRect.top;
+    state.sourceElements = [grid.rows[state.fromIndex]];
+  } else {
+    const columnRect = cellRects[0];
+    ghost.style.left = `${columnRect.left}px`;
+    ghost.style.top = `${tableRect.top}px`;
+    ghost.style.width = `${columnRect.width}px`;
+    ghost.style.height = `${tableRect.height}px`;
+    ghost.style.gridTemplateColumns = '1fr';
+    ghost.style.gridTemplateRows = cellRects.map(rect => `${rect.height}px`).join(' ');
+    state.ghostOffset = state.startX - columnRect.left;
+    state.sourceElements = cells;
+  }
+  state.sourceElements.forEach(element => element.classList.add('note-table-drag-source'));
+}
+
+function positionNoteTableDragGhost(state, event) {
+  const ghost = $('#noteTableDragGhost');
+  if (ghost.hidden) return;
+  if (state.type === 'row') ghost.style.top = `${event.clientY - state.ghostOffset}px`;
+  else ghost.style.left = `${event.clientX - state.ghostOffset}px`;
+}
+
+function clearNoteTableDragGhost(state) {
+  state?.sourceElements?.forEach(element => element.classList.remove('note-table-drag-source'));
+  const ghost = $('#noteTableDragGhost');
+  ghost.hidden = true;
+  ghost.replaceChildren();
+  ghost.removeAttribute('style');
+}
+
+function startNoteTableAxisDrag(type, event) {
+  const axis = noteTableHoverAxis;
+  if (!axis?.table?.isConnected || event.button !== 0) return;
+  noteTableAxisDragState = {
+    type,
+    table: axis.table,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    fromIndex: type === 'row' ? axis.row : axis.column,
+    targetIndex: type === 'row' ? axis.row : axis.column,
+    active: false,
+    blocked: noteTableHasMergedCells(axis.table)
+  };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function updateNoteTableAxisDrag(event) {
+  const state = noteTableAxisDragState;
+  if (!state || event.pointerId !== state.pointerId) return false;
+  const distance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY);
+  if (!state.active && distance < 5) return true;
+  event.preventDefault();
+  if (state.blocked) {
+    if (!state.warned) showToast('含合并单元格的表格请先拆分后再排序');
+    state.warned = true;
+    noteTableSuppressAxisClick = true;
+    return true;
+  }
+  if (!state.active) {
+    state.active = true;
+    captureNoteHistory('');
+    document.body.classList.add('reordering-note-table');
+    $('#noteTableTools').hidden = true;
+    createNoteTableDragGhost(state);
+  }
+  positionNoteTableDragGhost(state, event);
+  const grid = noteTableGrid(state.table);
+  if (state.type === 'row') {
+    const target = grid.rows.findIndex(row => {
+      const rect = row.getBoundingClientRect();
+      return event.clientY < rect.top + rect.height / 2;
+    });
+    state.targetIndex = target < 0 ? grid.rowCount - 1 : target;
+  } else state.targetIndex = noteTableColumnIndexAtX(state.table, event.clientX);
+  positionNoteTableDropIndicator(state);
+  return true;
+}
+
+function finishNoteTableAxisDrag(event, { cancelled = false } = {}) {
+  const state = noteTableAxisDragState;
+  if (!state || (event && event.pointerId !== state.pointerId)) return false;
+  noteTableAxisDragState = null;
+  $('#noteTableDropIndicator').hidden = true;
+  clearNoteTableDragGhost(state);
+  document.body.classList.remove('reordering-note-table');
+  if (state.active) noteTableSuppressAxisClick = true;
+  if (!cancelled && state.active && state.targetIndex !== state.fromIndex) {
+    const grid = noteTableGrid(state.table);
+    if (state.type === 'row') {
+      const source = grid.rows[state.fromIndex];
+      const target = grid.rows[state.targetIndex];
+      if (state.fromIndex < state.targetIndex) target.after(source);
+      else target.before(source);
+    } else {
+      grid.rows.forEach(row => {
+        const source = row.cells[state.fromIndex];
+        const target = row.cells[state.targetIndex];
+        if (state.fromIndex < state.targetIndex) target.after(source);
+        else target.before(source);
+      });
+      const columns = ensureNoteTableColumnDefinitions(state.table);
+      const source = columns[state.fromIndex];
+      const target = columns[state.targetIndex];
+      if (state.fromIndex < state.targetIndex) target.after(source);
+      else target.before(source);
+    }
+    const nextGrid = noteTableGrid(state.table);
+    noteTableHoverAxis = {
+      table: state.table,
+      row: state.type === 'row' ? state.targetIndex : 0,
+      column: state.type === 'column' ? state.targetIndex : 0
+    };
+    const axisCells = state.type === 'row'
+      ? [...new Set(nextGrid.matrix[state.targetIndex].filter(Boolean))]
+      : [...new Set(nextGrid.matrix.map(row => row[state.targetIndex]).filter(Boolean))];
+    setNoteTableSelection(state.table, axisCells, { anchor: axisCells[0], focus: axisCells.at(-1) });
+    scheduleNoteSave();
+    showToast(state.type === 'row' ? '行顺序已调整' : '列顺序已调整');
+  } else if (state.active) positionNoteTableTools();
+  setTimeout(() => { noteTableSuppressAxisClick = false; }, 0);
+  return true;
+}
+
 function hideNoteTableTools() {
-  activeNoteTable?.querySelectorAll('.active-cell').forEach(cell => cell.classList.remove('active-cell'));
+  activeNoteTable?.querySelectorAll('.active-cell, .selected-cell, .selection-anchor').forEach(cell => {
+    cell.classList.remove('active-cell', 'selected-cell', 'selection-anchor');
+    cell.removeAttribute('aria-selected');
+  });
   activeNoteTable = null;
   activeNoteTableCell = null;
+  activeNoteTableCells = [];
+  noteTableSelectionAnchor = null;
+  noteTablePointerSelection = null;
   $('#noteTableTools').hidden = true;
+  $('#noteTableHandle').hidden = true;
+  hideNoteTableContentDragHandle();
+  hideNoteTableInsertHandles();
+  clearNoteTableOuterResizeCandidate();
+  hideNoteTableAxisHandles();
 }
 
 function positionNoteTableTools() {
@@ -1594,22 +3019,25 @@ function positionNoteTableTools() {
     return;
   }
   tools.hidden = false;
+  const handle = $('#noteTableHandle');
+  handle.hidden = false;
   const tableRect = activeNoteTable.getBoundingClientRect();
+  const toolbarLeft = Math.max(12, tableRect.left);
+  tools.style.maxWidth = `${Math.max(280, window.innerWidth - toolbarLeft - 12)}px`;
   const toolsRect = tools.getBoundingClientRect();
-  const left = Math.min(window.innerWidth - toolsRect.width - 12, Math.max(12, tableRect.left));
+  const left = Math.min(window.innerWidth - toolsRect.width - 12, toolbarLeft);
   const top = tableRect.top - toolsRect.height - 8 >= 12 ? tableRect.top - toolsRect.height - 8 : Math.min(window.innerHeight - toolsRect.height - 12, tableRect.top + 8);
   tools.style.left = `${left}px`;
   tools.style.top = `${top}px`;
+  const documentRect = $('.note-document').getBoundingClientRect();
+  handle.style.left = `${Math.max(documentRect.left + 8, tableRect.left - 38)}px`;
+  handle.style.top = `${Math.max(documentRect.top + 8, tableRect.top - 36)}px`;
 }
 
 function showNoteTableTools(cell = noteTableCellFromSelection()) {
   const table = cell?.closest?.('table.note-table');
   if (!table) return;
-  activeNoteTable?.querySelectorAll('.active-cell').forEach(item => item.classList.remove('active-cell'));
-  activeNoteTable = table;
-  activeNoteTableCell = cell;
-  cell.classList.add('active-cell');
-  positionNoteTableTools();
+  setNoteTableSelection(table, [cell], { anchor: cell, focus: cell });
 }
 
 function insertNoteTable(context, rows = 3, columns = 3) {
@@ -1708,27 +3136,183 @@ function commitNoteTablePicker() {
   scheduleNoteSave();
 }
 
+function mergeSelectedNoteTableCells() {
+  const details = noteTableSelectionDetails();
+  if (!details?.rectangular || activeNoteTableCells.length < 2) {
+    showToast('请选择一个连续的矩形区域');
+    return;
+  }
+  captureNoteHistory('');
+  const survivor = details.grid.matrix[details.top]?.[details.left];
+  const orderedCells = [...details.regionCells].sort((a, b) => {
+    const first = details.grid.meta.get(a);
+    const second = details.grid.meta.get(b);
+    return first.row - second.row || first.column - second.column;
+  });
+  const contents = orderedCells
+    .map(cell => cell.innerHTML.trim())
+    .filter(content => content && !/^<br\s*\/?\s*>$/i.test(content));
+  survivor.innerHTML = contents.length ? contents.join('<br>') : '<br>';
+  survivor.rowSpan = details.bottom - details.top + 1;
+  survivor.colSpan = details.right - details.left + 1;
+  orderedCells.forEach(cell => {
+    if (cell !== survivor) cell.remove();
+  });
+  setNoteTableSelection(activeNoteTable, [survivor], { anchor: survivor, focus: survivor });
+  scheduleNoteSave();
+  showToast('单元格已合并');
+}
+
+function splitSelectedNoteTableCells() {
+  const table = activeNoteTable;
+  const grid = noteTableGrid(table);
+  const mergedCells = activeNoteTableCells.filter(cell => cell.rowSpan > 1 || cell.colSpan > 1);
+  if (!mergedCells.length) return;
+  captureNoteHistory('');
+  let selectionBounds = null;
+  mergedCells
+    .map(cell => ({ cell, details: grid.meta.get(cell) }))
+    .filter(item => item.details)
+    .sort((a, b) => a.details.row - b.details.row || a.details.column - b.details.column)
+    .forEach(({ cell, details }) => {
+      selectionBounds ||= { top: details.row, left: details.column, bottom: details.row, right: details.column };
+      selectionBounds.top = Math.min(selectionBounds.top, details.row);
+      selectionBounds.left = Math.min(selectionBounds.left, details.column);
+      selectionBounds.bottom = Math.max(selectionBounds.bottom, details.row + details.rowspan - 1);
+      selectionBounds.right = Math.max(selectionBounds.right, details.column + details.colspan - 1);
+      cell.rowSpan = 1;
+      cell.colSpan = 1;
+      for (let row = details.row; row < details.row + details.rowspan; row += 1) {
+        for (let column = details.column; column < details.column + details.colspan; column += 1) {
+          if (row === details.row && column === details.column) continue;
+          const targetRow = table.rows[row];
+          if (!targetRow) continue;
+          const before = [...targetRow.cells].find(candidate => {
+            const candidateDetails = grid.meta.get(candidate);
+            return candidateDetails && candidateDetails.column > column;
+          });
+          const newCell = document.createElement(cell.tagName.toLowerCase());
+          newCell.innerHTML = '<br>';
+          targetRow.insertBefore(newCell, before || null);
+        }
+      }
+    });
+  const nextGrid = noteTableGrid(table);
+  const start = nextGrid.matrix[selectionBounds.top]?.[selectionBounds.left];
+  const end = nextGrid.matrix[selectionBounds.bottom]?.[selectionBounds.right];
+  const nextCells = start && end ? noteTableCellsBetween(table, start, end) : [start].filter(Boolean);
+  setNoteTableSelection(table, nextCells, { anchor: start, focus: end || start });
+  scheduleNoteSave();
+  showToast('已拆分为独立单元格');
+}
+
+function equalizeSelectedNoteTableColumns() {
+  if (!activeNoteTable?.isConnected) return;
+  captureNoteHistory('');
+  activeNoteTable.style.removeProperty('width');
+  activeNoteTable.querySelector(':scope > colgroup')?.remove();
+  activeNoteTable.querySelectorAll('td, th').forEach(cell => {
+    cell.style.removeProperty('width');
+    cell.style.removeProperty('min-width');
+  });
+  positionNoteTableTools();
+  scheduleNoteSave();
+  showToast('列宽已均分');
+}
+
+function equalizeSelectedNoteTableRows() {
+  const details = noteTableSelectionDetails();
+  if (!details) return;
+  captureNoteHistory('');
+  const rows = details.grid.rows.slice(details.top, details.bottom + 1);
+  rows.forEach(row => [...row.cells].forEach(cell => cell.style.removeProperty('height')));
+  const height = Math.ceil(Math.max(...rows.map(row => row.getBoundingClientRect().height), 43));
+  rows.forEach(row => [...row.cells].forEach(cell => { cell.style.height = `${height}px`; }));
+  positionNoteTableTools();
+  scheduleNoteSave();
+  showToast('行高已均分');
+}
+
 function runNoteTableAction(action) {
   const table = activeNoteTable;
   const cell = activeNoteTableCell?.isConnected ? activeNoteTableCell : noteTableCellFromSelection();
   if (!table?.isConnected || !cell) return;
+  const selectionDetails = noteTableSelectionDetails(table, activeNoteTableCells.length ? activeNoteTableCells : [cell]);
+  const cellDetails = selectionDetails?.grid.meta.get(cell);
+  if (action === 'select-row' && cellDetails) {
+    const rowCells = [...new Set(selectionDetails.grid.matrix[cellDetails.row].filter(Boolean))];
+    const cells = noteTableCellsBetween(table, rowCells[0], rowCells.at(-1));
+    setNoteTableSelection(table, cells, { anchor: cells[0], focus: cells.at(-1) });
+    return;
+  }
+  if (action === 'select-column' && cellDetails) {
+    const columnCells = [...new Set(selectionDetails.grid.matrix.map(row => row[cellDetails.column]).filter(Boolean))];
+    const cells = noteTableCellsBetween(table, columnCells[0], columnCells.at(-1));
+    setNoteTableSelection(table, cells, { anchor: cells[0], focus: cells.at(-1) });
+    return;
+  }
+  if (action === 'merge-cells') {
+    mergeSelectedNoteTableCells();
+    return;
+  }
+  if (action === 'split-cells') {
+    splitSelectedNoteTableCells();
+    return;
+  }
+  if (action === 'equalize-columns') {
+    equalizeSelectedNoteTableColumns();
+    return;
+  }
+  if (action === 'equalize-rows') {
+    equalizeSelectedNoteTableRows();
+    return;
+  }
+  if (action === 'toggle-row-header' || action === 'toggle-column-header') {
+    captureNoteHistory('');
+    const key = action === 'toggle-row-header' ? 'freezeRowHeader' : 'freezeColumnHeader';
+    const label = action === 'toggle-row-header' ? '行头' : '列头';
+    const enabled = table.dataset[key] !== 'true';
+    if (enabled) table.dataset[key] = 'true';
+    else delete table.dataset[key];
+    updateNoteTableToolbar();
+    positionNoteTableTools();
+    scheduleNoteSave();
+    showToast(enabled ? `${label}已固定` : `已取消固定${label}`);
+    return;
+  }
   const row = cell.parentElement;
-  const rowIndex = row.rowIndex;
-  const columnIndex = cell.cellIndex;
+  const currentGrid = noteTableGrid(table);
+  const currentCellDetails = currentGrid.meta.get(cell) || { row: row.rowIndex, column: cell.cellIndex, rowspan: 1, colspan: 1 };
+  const rowIndex = currentCellDetails.row;
+  const columnIndex = currentCellDetails.column;
   captureNoteHistory('');
   let nextCell = cell;
 
   if (action === 'add-row-above' || action === 'add-row-below') {
     const newRow = document.createElement('tr');
-    const columnCount = table.rows[0]?.cells.length || 1;
+    const columnCount = currentGrid.columnCount || 1;
     for (let index = 0; index < columnCount; index += 1) newRow.insertCell().innerHTML = '<br>';
     if (action === 'add-row-above') row.before(newRow);
     else row.after(newRow);
     nextCell = newRow.cells[Math.min(columnIndex, columnCount - 1)];
   } else if (action === 'add-column-left' || action === 'add-column-right') {
-    const insertIndex = action === 'add-column-left' ? columnIndex : columnIndex + 1;
-    [...table.rows].forEach(currentRow => currentRow.insertCell(Math.min(insertIndex, currentRow.cells.length)).innerHTML = '<br>');
-    nextCell = table.rows[rowIndex]?.cells[insertIndex];
+    const insertIndex = action === 'add-column-left' ? columnIndex : columnIndex + currentCellDetails.colspan;
+    insertNoteTableColumnDefinition(table, insertIndex);
+    const expandedCells = new Set();
+    currentGrid.rows.forEach((currentRow, currentRowIndex) => {
+      const coveringCell = currentGrid.matrix[currentRowIndex]?.[insertIndex];
+      const coveringDetails = currentGrid.meta.get(coveringCell);
+      if (coveringCell && coveringDetails?.column < insertIndex) {
+        if (!expandedCells.has(coveringCell)) coveringCell.colSpan += 1;
+        expandedCells.add(coveringCell);
+        return;
+      }
+      const before = [...currentRow.cells].find(candidate => (currentGrid.meta.get(candidate)?.column ?? Infinity) >= insertIndex);
+      const newCell = document.createElement('td');
+      newCell.innerHTML = '<br>';
+      currentRow.insertBefore(newCell, before || null);
+      if (currentRowIndex === rowIndex) nextCell = newCell;
+    });
   } else if (action === 'delete-row') {
     if (table.rows.length === 1) {
       const tail = ensureNoteTableTail(table);
@@ -1742,7 +3326,7 @@ function runNoteTableAction(action) {
     const targetRow = table.rows[Math.min(rowIndex, table.rows.length - 1)];
     nextCell = targetRow.cells[Math.min(columnIndex, targetRow.cells.length - 1)];
   } else if (action === 'delete-column') {
-    if ((table.rows[0]?.cells.length || 0) === 1) {
+    if (currentGrid.columnCount <= 1) {
       const tail = ensureNoteTableTail(table);
       table.remove();
       hideNoteTableTools();
@@ -1750,8 +3334,14 @@ function runNoteTableAction(action) {
       scheduleNoteSave();
       return;
     }
-    [...table.rows].forEach(currentRow => currentRow.deleteCell(columnIndex));
-    nextCell = table.rows[Math.min(rowIndex, table.rows.length - 1)]?.cells[Math.min(columnIndex, table.rows[0].cells.length - 1)];
+    deleteNoteTableColumnDefinition(table, columnIndex);
+    const columnCells = [...new Set(currentGrid.matrix.map(currentRow => currentRow[columnIndex]).filter(Boolean))];
+    columnCells.forEach(columnCell => {
+      if (columnCell.colSpan > 1) columnCell.colSpan -= 1;
+      else columnCell.remove();
+    });
+    const nextGrid = noteTableGrid(table);
+    nextCell = nextGrid.matrix[Math.min(rowIndex, nextGrid.rowCount - 1)]?.[Math.min(columnIndex, nextGrid.columnCount - 1)];
   } else if (action === 'delete-table') {
     const tail = ensureNoteTableTail(table);
     table.remove();
@@ -1767,7 +3357,7 @@ function runNoteTableAction(action) {
 
 function handleNoteTableTab(event) {
   if (event.key !== 'Tab') return false;
-  const cell = noteTableCellFromSelection();
+  const cell = noteTableCellFromSelection() || (activeNoteTableCell?.isConnected ? activeNoteTableCell : null);
   const table = cell?.closest?.('table.note-table');
   if (!table) return false;
   event.preventDefault();
@@ -1776,7 +3366,7 @@ function handleNoteTableTab(event) {
   if (nextIndex >= cells.length) {
     captureNoteHistory('');
     const row = table.tBodies[0]?.insertRow() || table.insertRow();
-    const columnCount = table.rows[0]?.cells.length || 1;
+    const columnCount = noteTableGrid(table).columnCount || 1;
     for (let index = 0; index < columnCount; index += 1) row.insertCell().innerHTML = '<br>';
     cells = [...table.querySelectorAll('td, th')];
     nextIndex = cells.length - columnCount;
@@ -1981,6 +3571,22 @@ function formatNoteTime(timestamp) {
     : date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
 }
 
+function formatNoteSaveTime(timestamp) {
+  const date = new Date(timestamp || Date.now());
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function renderNoteSaveStatus(state = 'saved', note = noteById()) {
+  const status = $('#noteSaveStatus');
+  status.classList.toggle('saving', state === 'saving');
+  status.classList.toggle('error', state === 'error');
+  const lastSaved = note?.updatedAt ? formatNoteSaveTime(note.updatedAt) : '--';
+  if (state === 'saving') status.textContent = `保存中… · 上次保存：${lastSaved}`;
+  else if (state === 'error') status.textContent = `保存失败 · 最近保存：${lastSaved}`;
+  else status.textContent = `最近保存：${lastSaved}`;
+}
+
 function persistNotes() {
   try {
     store.set('mos-notes', notes);
@@ -2066,6 +3672,9 @@ function noteOutlineHeadingLabel(heading, index) {
 function renderNoteOutline() {
   applyNoteHeadingCollapses();
   const headings = noteHeadings();
+  const outlineUnavailable = headings.length === 0;
+  $('.notes-shell').classList.toggle('note-outline-unavailable', outlineUnavailable);
+  $('.note-outline').setAttribute('aria-hidden', String(outlineUnavailable));
   if (!headings.length) {
     noteOutlineState.items = [];
     noteOutlineState.activeIndex = null;
@@ -2240,6 +3849,65 @@ function toggleNoteOutlineItem(item) {
   scheduleNoteSave();
 }
 
+function noteTitleLeadingEmoji(value = $('#noteTitle').value) {
+  const trimmed = String(value || '').trimStart();
+  if (!trimmed) return '';
+  let grapheme = '';
+  try {
+    [grapheme] = [...new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(trimmed)].map(part => part.segment);
+  } catch {
+    [grapheme] = Array.from(trimmed);
+  }
+  return /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Presentation})/u.test(grapheme || '') ? grapheme : '';
+}
+
+function noteTitleWithoutLeadingEmoji(value = $('#noteTitle').value) {
+  const trimmed = String(value || '').trimStart();
+  const emoji = noteTitleLeadingEmoji(trimmed);
+  return emoji ? trimmed.slice(emoji.length).trimStart() : trimmed;
+}
+
+function renderNoteTitleEmojiMenu() {
+  const selectedEmoji = noteTitleLeadingEmoji();
+  $('#noteTitleEmojiMenu').innerHTML = `${noteTitleEmojis.map(emoji => `
+    <button type="button" role="menuitem" data-note-title-emoji="${emoji}" class="${emoji === selectedEmoji ? 'active' : ''}" aria-label="使用 ${emoji}">${emoji}</button>
+  `).join('')}
+    <button type="button" role="menuitem" class="clear" data-note-title-emoji-clear ${selectedEmoji ? '' : 'disabled'}>清除标题 Emoji</button>`;
+}
+
+function closeNoteTitleEmojiMenu() {
+  $('#noteTitleEmojiMenu').hidden = true;
+  $('#noteTitleEmojiButton').setAttribute('aria-expanded', 'false');
+}
+
+function toggleNoteTitleEmojiMenu() {
+  const menu = $('#noteTitleEmojiMenu');
+  if (!menu.hidden) {
+    closeNoteTitleEmojiMenu();
+    return;
+  }
+  if (!noteTitleLeadingEmoji()) {
+    const title = $('#noteTitle');
+    captureNoteHistory('title:emoji');
+    title.value = `📄${title.value.trim() ? ` ${title.value.trimStart()}` : ''}`;
+    scheduleNoteSave();
+  }
+  renderNoteTitleEmojiMenu();
+  menu.hidden = false;
+  $('#noteTitleEmojiButton').setAttribute('aria-expanded', 'true');
+}
+
+function applyNoteTitleEmoji(emoji = '') {
+  const title = $('#noteTitle');
+  const remainingTitle = noteTitleWithoutLeadingEmoji(title.value);
+  captureNoteHistory('title:emoji');
+  title.value = emoji ? `${emoji}${remainingTitle ? ` ${remainingTitle}` : ''}` : remainingTitle;
+  closeNoteTitleEmojiMenu();
+  title.focus({ preventScroll: true });
+  title.setSelectionRange(title.value.length, title.value.length);
+  scheduleNoteSave();
+}
+
 function loadActiveNote({ focusTitle = false } = {}) {
   if (!noteById()) activeNoteId = notes[0]?.id ?? null;
   const note = noteById();
@@ -2257,18 +3925,27 @@ function loadActiveNote({ focusTitle = false } = {}) {
   $('#noteCalloutEmojiMenu').hidden = true;
   hideNoteTableTools();
   closeNoteTablePicker();
+  closeNoteTitleEmojiMenu();
   finishNoteBlockDrag();
   closeNoteSlashMenu();
   hideNoteHeadingTools({ immediate: true });
   $('#noteSelectionBubble').hidden = true;
   $('#noteTitle').value = note.title || '';
   $('#noteEditor').innerHTML = sanitizeNoteHTML(note.content);
+  const sharedMode = isActiveSharedNote();
+  const sharedReadOnly = Boolean(sharedMode && activeSharedNote.sharePermission !== 'edit');
+  $('#noteTitle').disabled = sharedReadOnly;
+  $('#noteEditor').contentEditable = String(!sharedReadOnly);
+  $('#openNoteShare').disabled = sharedMode;
+  $('#deleteNote').disabled = sharedMode;
+  document.body.classList.toggle('shared-note-active', sharedMode);
+  document.body.classList.toggle('shared-note-readonly', sharedReadOnly);
+  leftAlignNoteTablesInContentLane();
   prepareNoteImages();
   $('.note-document').scrollTop = 0;
   renderNoteOutline();
   if (noteOutlineState.items.length) noteOutlineState.activeIndex = 0;
-  $('#noteSaveStatus').textContent = '已保存';
-  $('#noteSaveStatus').classList.remove('saving');
+  renderNoteSaveStatus('saved', note);
   renderNoteList();
   if (!$('#noteSharePanel').hidden) renderNoteSharePanel();
   if (focusTitle) {
@@ -2284,26 +3961,44 @@ function saveActiveNote() {
   if (!note) return;
   note.title = $('#noteTitle').value.trim() || '无标题文档';
   note.content = sanitizeNoteHTML($('#noteEditor').innerHTML);
+  if (isActiveSharedNote()) {
+    if (activeSharedNote.sharePermission !== 'edit') return;
+    note.updatedAt = Date.now();
+    renderNoteSaveStatus('saving', note);
+    clearTimeout(sharedNoteSaveTimer);
+    sharedNoteSaveTimer = setTimeout(async () => {
+      try {
+        await saveSharedNote();
+        renderNoteSaveStatus('saved', note);
+      } catch (error) {
+        renderNoteSaveStatus('error', note);
+        showToast(error.message || '共享文档保存失败');
+      }
+    }, 500);
+    return;
+  }
+  const previousUpdatedAt = note.updatedAt;
   note.updatedAt = Date.now();
   if (!persistNotes()) {
-    $('#noteSaveStatus').textContent = '保存失败';
-    $('#noteSaveStatus').classList.remove('saving');
+    note.updatedAt = previousUpdatedAt;
+    renderNoteSaveStatus('error', note);
     return;
   }
   renderNoteList();
-  $('#noteSaveStatus').textContent = '已保存';
-  $('#noteSaveStatus').classList.remove('saving');
+  renderNoteSaveStatus('saved', note);
+  if (note.sharing?.enabled && currentUser) publishNoteShare(note).catch(() => {});
 }
 
 function scheduleNoteSave() {
   clearTimeout(noteSaveTimer);
-  $('#noteSaveStatus').textContent = '保存中…';
-  $('#noteSaveStatus').classList.add('saving');
+  renderNoteSaveStatus('saving');
   noteSaveTimer = setTimeout(saveActiveNote, 320);
 }
 
 function createNote() {
   saveActiveNote();
+  activeSharedNote = null;
+  localNoteIdBeforeShare = null;
   const now = Date.now();
   const note = { id: `note-${now}-${Math.random().toString(36).slice(2, 7)}`, title: '无标题文档', content: '', createdAt: now, updatedAt: now, sharing: { enabled: false, permission: 'view', token: '' } };
   notes.unshift(note);
@@ -2751,7 +4446,7 @@ $('#categoryTabs').addEventListener('click', event => {
   renderSites();
 });
 
-$('#siteGrid').addEventListener('click', event => {
+$('#bookmarksView').addEventListener('click', event => {
   const action = event.target.closest('[data-action]');
   if (!action) {
     const card = event.target.closest('.site-card');
@@ -2786,6 +4481,11 @@ $('#siteGrid').addEventListener('click', event => {
 
   if (action.dataset.action === 'open-add') {
     openSiteDialog();
+    return;
+  }
+
+  if (action.dataset.action === 'import-bookmarks') {
+    $('#bookmarkImportDialog').showModal();
     return;
   }
 
@@ -3219,6 +4919,8 @@ $('#notesList').addEventListener('click', event => {
   const button = event.target.closest('[data-note-id]');
   if (!button || button.dataset.noteId === activeNoteId) return;
   saveActiveNote();
+  activeSharedNote = null;
+  localNoteIdBeforeShare = null;
   activeNoteId = button.dataset.noteId;
   persistNotes();
   loadActiveNote();
@@ -3232,27 +4934,58 @@ $('#noteShareBackdrop').addEventListener('click', closeNoteSharePanel);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !$('#noteSharePanel').hidden) closeNoteSharePanel();
 });
-$('#noteShareEnabled').addEventListener('click', () => {
+$('#noteShareEnabled').addEventListener('click', async () => {
   const note = noteById();
   if (!note) return;
-  note.sharing.enabled = !note.sharing.enabled;
-  if (note.sharing.enabled) noteShareToken(note);
-  persistNotes();
-  renderNoteSharePanel();
-  showToast(note.sharing.enabled ? '链接分享已开启' : '链接分享已关闭');
+  const nextEnabled = !note.sharing.enabled;
+  if (nextEnabled && !currentUser) {
+    closeNoteSharePanel();
+    openAuthDialog();
+    showToast('登录后即可生成真实分享链接');
+    return;
+  }
+  try {
+    if (nextEnabled) {
+      note.sharing.enabled = true;
+      noteShareToken(note);
+      saveActiveNote();
+      await publishNoteShare(note);
+    } else {
+      await removeNoteShare(note);
+      note.sharing.enabled = false;
+    }
+    persistNotes();
+    renderNoteSharePanel();
+    showToast(nextEnabled ? '链接分享已开启' : '链接分享已关闭');
+  } catch (error) {
+    note.sharing.enabled = !nextEnabled;
+    renderNoteSharePanel();
+    showToast(error.message || '分享设置失败');
+  }
 });
-$('.note-permission-options').addEventListener('click', event => {
+$('.note-permission-options').addEventListener('click', async event => {
   const button = event.target.closest('[data-note-permission]');
   const note = noteById();
   if (!button || !note?.sharing?.enabled) return;
+  const previousPermission = note.sharing.permission;
   note.sharing.permission = button.dataset.notePermission === 'edit' ? 'edit' : 'view';
-  persistNotes();
-  renderNoteSharePanel();
-  showToast(note.sharing.permission === 'edit' ? '已设为可编辑' : '已设为仅查看');
+  try {
+    saveActiveNote();
+    await publishNoteShare(note);
+    persistNotes();
+    renderNoteSharePanel();
+    showToast(note.sharing.permission === 'edit' ? '已设为可编辑' : '已设为仅查看');
+  } catch (error) {
+    note.sharing.permission = previousPermission;
+    renderNoteSharePanel();
+    showToast(error.message || '分享权限更新失败');
+  }
 });
 $('#copyNoteShareLink').addEventListener('click', async () => {
   const note = noteById();
   if (!note?.sharing?.enabled) return;
+  try { await publishNoteShare(note); }
+  catch (error) { showToast(error.message || '分享内容发布失败'); return; }
   const link = noteShareURL(note);
   try {
     await navigator.clipboard.writeText(link);
@@ -3280,6 +5013,20 @@ $('#noteImageInput').addEventListener('change', event => {
 $('#noteTitle').addEventListener('beforeinput', event => captureNoteHistory(`title:${event.inputType}`));
 $('#noteEditor').addEventListener('beforeinput', event => captureNoteHistory(`editor:${event.inputType}`));
 $('#noteTitle').addEventListener('input', scheduleNoteSave);
+$('#noteTitleEmojiButton').addEventListener('pointerdown', event => event.preventDefault());
+$('#noteTitleEmojiButton').addEventListener('click', toggleNoteTitleEmojiMenu);
+$('#noteTitleEmojiMenu').addEventListener('pointerdown', event => event.preventDefault());
+$('#noteTitleEmojiMenu').addEventListener('click', event => {
+  const emojiButton = event.target.closest('[data-note-title-emoji]');
+  if (emojiButton) {
+    applyNoteTitleEmoji(emojiButton.dataset.noteTitleEmoji);
+    return;
+  }
+  if (event.target.closest('[data-note-title-emoji-clear]')) applyNoteTitleEmoji('');
+});
+document.addEventListener('pointerdown', event => {
+  if (!event.target.closest('.note-document-title')) closeNoteTitleEmojiMenu();
+});
 $('#noteEditor').addEventListener('input', event => {
   const selection = window.getSelection();
   const inputNode = selection?.anchorNode?.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection?.anchorNode;
@@ -3294,11 +5041,76 @@ $('#noteEditor').addEventListener('input', event => {
 });
 $('#noteEditor').addEventListener('focusin', event => {
   const cell = event.target.closest?.('td, th') || noteTableCellFromSelection();
-  if (cell) requestAnimationFrame(() => showNoteTableTools(cell));
+  if (cell && !(activeNoteTableCells.length > 1 && activeNoteTableCells.includes(cell))) requestAnimationFrame(() => showNoteTableTools(cell));
 });
 $('#noteEditor').addEventListener('click', event => {
   const cell = event.target.closest?.('td, th');
-  if (cell) requestAnimationFrame(() => showNoteTableTools(cell));
+  if (!cell || noteTableSuppressClick || noteTableContentOwnsPointer(event.target)) return;
+  if (event.shiftKey && noteTableSelectionAnchor?.closest('table.note-table') === cell.closest('table.note-table')) {
+    const table = cell.closest('table.note-table');
+    setNoteTableSelection(table, noteTableCellsBetween(table, noteTableSelectionAnchor, cell), { anchor: noteTableSelectionAnchor, focus: cell });
+    return;
+  }
+  requestAnimationFrame(() => showNoteTableTools(cell));
+});
+$('#noteEditor').addEventListener('pointerdown', event => {
+  const outerResizeCandidate = noteTableOuterResizeCandidateAtPoint(event.clientX, event.clientY);
+  if (outerResizeCandidate && startNoteTableOuterResize(outerResizeCandidate, event)) return;
+  const cell = event.target.closest?.('td, th');
+  if (!cell || event.button !== 0) return;
+  const resizeCandidate = noteTableResizeCandidateAtPoint(cell, event.clientX, event.clientY);
+  if (resizeCandidate && startNoteTableResize(resizeCandidate, event)) return;
+  if (noteTableContentOwnsPointer(event.target)) {
+    noteTablePointerSelection = null;
+    return;
+  }
+  const table = cell.closest('table.note-table');
+  if (event.shiftKey && noteTableSelectionAnchor?.closest('table.note-table') === table) {
+    event.preventDefault();
+    noteTableSuppressClick = true;
+    setNoteTableSelection(table, noteTableCellsBetween(table, noteTableSelectionAnchor, cell), { anchor: noteTableSelectionAnchor, focus: cell });
+    setTimeout(() => { noteTableSuppressClick = false; }, 0);
+    return;
+  }
+  noteTablePointerSelection = {
+    pointerId: event.pointerId,
+    table,
+    startCell: cell,
+    lastCell: cell,
+    active: false
+  };
+});
+document.addEventListener('pointermove', event => {
+  if (updateNoteTableOuterResize(event) || updateNoteTableResize(event) || updateNoteTableAxisDrag(event) || updateNoteTableContentDrag(event)) return;
+  const state = noteTablePointerSelection;
+  if (!state || event.pointerId !== state.pointerId) return;
+  const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('#noteEditor td, #noteEditor th');
+  if (!cell || cell.closest('table.note-table') !== state.table || cell === state.lastCell) return;
+  state.active = true;
+  state.lastCell = cell;
+  event.preventDefault();
+  noteSelectionPointerActive = false;
+  $('#noteSelectionBubble').hidden = true;
+  window.getSelection()?.removeAllRanges();
+  setNoteTableSelection(state.table, noteTableCellsBetween(state.table, state.startCell, cell), { anchor: state.startCell, focus: cell });
+}, { passive: false });
+document.addEventListener('pointerup', event => {
+  if (finishNoteTableOuterResize(event) || finishNoteTableResize(event) || finishNoteTableAxisDrag(event) || finishNoteTableContentDrag(event)) return;
+  const state = noteTablePointerSelection;
+  if (!state || event.pointerId !== state.pointerId) return;
+  noteTablePointerSelection = null;
+  if (!state.active) return;
+  event.preventDefault();
+  noteTableSuppressClick = true;
+  noteSelectionPointerActive = false;
+  window.getSelection()?.removeAllRanges();
+  $('#noteEditor').focus({ preventScroll: true });
+  positionNoteTableTools();
+  setTimeout(() => { noteTableSuppressClick = false; }, 0);
+});
+document.addEventListener('pointercancel', event => {
+  if (finishNoteTableOuterResize(event, { cancelled: true }) || finishNoteTableResize(event) || finishNoteTableAxisDrag(event, { cancelled: true }) || finishNoteTableContentDrag(event, { cancelled: true })) return;
+  if (noteTablePointerSelection?.pointerId === event.pointerId) noteTablePointerSelection = null;
 });
 $('#noteTableTools').addEventListener('pointerdown', event => {
   if (event.target.closest('[data-note-table-action]')) event.preventDefault();
@@ -3307,6 +5119,59 @@ $('#noteTableTools').addEventListener('click', event => {
   const button = event.target.closest('[data-note-table-action]');
   if (button) runNoteTableAction(button.dataset.noteTableAction);
 });
+$('#noteTableHandle').addEventListener('pointerdown', event => event.preventDefault());
+$('#noteTableHandle').addEventListener('click', () => {
+  if (!activeNoteTable?.isConnected) return;
+  const cells = [...activeNoteTable.querySelectorAll('td, th')];
+  setNoteTableSelection(activeNoteTable, cells, { anchor: cells[0], focus: cells.at(-1) });
+});
+$('#noteTableRowHandle').addEventListener('pointerdown', event => startNoteTableAxisDrag('row', event));
+$('#noteTableColumnHandle').addEventListener('pointerdown', event => startNoteTableAxisDrag('column', event));
+$('#noteTableInsertRowHandle').addEventListener('pointerdown', event => event.preventDefault());
+$('#noteTableInsertColumnHandle').addEventListener('pointerdown', event => event.preventDefault());
+$('#noteTableInsertRowHandle').addEventListener('click', () => insertNoteTableAtBoundary('row'));
+$('#noteTableInsertColumnHandle').addEventListener('click', () => insertNoteTableAtBoundary('column'));
+$('#noteTableContentDragHandle').addEventListener('pointerdown', event => {
+  if (noteTableContentHandleCell) startNoteTableContentDrag(noteTableContentHandleCell, event);
+});
+$('#noteTableRowHandle').addEventListener('click', () => {
+  if (!noteTableSuppressAxisClick) selectHoveredNoteTableAxis('row');
+});
+$('#noteTableColumnHandle').addEventListener('click', () => {
+  if (!noteTableSuppressAxisClick) selectHoveredNoteTableAxis('column');
+});
+document.addEventListener('pointermove', event => {
+  if (noteTableOuterResizeState || noteTableResizeState || noteTableAxisDragState || noteTableContentDragState) return;
+  const outerResizeCandidate = noteTableOuterResizeCandidateAtPoint(event.clientX, event.clientY);
+  setNoteTableOuterResizeCandidate(outerResizeCandidate);
+  if (outerResizeCandidate) {
+    clearNoteTableResizeCandidate();
+    hideNoteTableContentDragHandle();
+    hideNoteTableInsertHandles();
+    hideNoteTableAxisHandles();
+    return;
+  }
+  const cell = event.target.closest?.('#noteEditor td, #noteEditor th');
+  if (cell && !noteTablePointerSelection?.active) {
+    showNoteTableInsertHandles(cell, event.clientX, event.clientY);
+    const resizeCandidate = noteTableResizeCandidateAtPoint(cell, event.clientX, event.clientY);
+    setNoteTableResizeCandidate(resizeCandidate);
+    if (resizeCandidate) {
+      hideNoteTableContentDragHandle();
+      hideNoteTableAxisHandles();
+      return;
+    }
+    showNoteTableContentDragHandle(cell);
+    showNoteTableAxisHandles(cell, event.clientX, event.clientY);
+    return;
+  }
+  if (event.target.closest?.('#noteTableContentDragHandle, .note-table-insert-handle')) return;
+  hideNoteTableContentDragHandle();
+  clearNoteTableResizeCandidate();
+  if (!showNoteTableInsertHandlesFromOuterZone(event.clientX, event.clientY)) hideNoteTableInsertHandles();
+  if (showNoteTableAxisHandlesFromOuterZone(event.clientX, event.clientY)) return;
+  if (!event.target.closest?.('#noteTableRowHandle, #noteTableColumnHandle')) hideNoteTableAxisHandles();
+}, { passive: true });
 $('#noteTablePickerGrid').addEventListener('pointermove', event => {
   updateNoteTablePickerSize(event.target.closest('.note-table-picker-cell'));
 });
@@ -3333,14 +5198,22 @@ document.addEventListener('pointercancel', () => {
   $('#noteTablePicker').classList.remove('dragging');
 });
 document.addEventListener('pointerdown', event => {
-  if (!event.target.closest('#noteTableTools, #noteEditor table.note-table')) hideNoteTableTools();
+  if (!event.target.closest('#noteTableTools, #noteTableHandle, #noteTableRowHandle, #noteTableColumnHandle, .note-table-insert-handle, #noteTableContentDragHandle, #noteEditor table.note-table')) hideNoteTableTools();
   if (!event.target.closest('#noteTablePicker, [data-note-slash-index]')) closeNoteTablePicker();
 });
 $('.note-document').addEventListener('scroll', () => {
   if (!$('#noteTableTools').hidden) positionNoteTableTools();
+  if (noteTableHoverAxis) positionNoteTableAxisHandles();
+  if (noteTableOuterResizeCandidate) setNoteTableOuterResizeCandidate(noteTableOuterResizeCandidate);
+  if (noteTableInsertBoundary) positionNoteTableInsertHandles();
+  if (noteTableContentHandleCell) positionNoteTableContentDragHandle();
 }, { passive: true });
 window.addEventListener('resize', () => {
   if (!$('#noteTableTools').hidden) positionNoteTableTools();
+  if (noteTableHoverAxis) positionNoteTableAxisHandles();
+  if (noteTableOuterResizeCandidate) setNoteTableOuterResizeCandidate(noteTableOuterResizeCandidate);
+  if (noteTableInsertBoundary) positionNoteTableInsertHandles();
+  if (noteTableContentHandleCell) positionNoteTableContentDragHandle();
 });
 $('#noteEditor').addEventListener('pointerdown', handleNoteMarqueePointerDown);
 document.addEventListener('pointermove', updateNoteMarqueeSelection, { passive: false });
@@ -3416,9 +5289,20 @@ document.addEventListener('pointercancel', finishNoteBlockPointerDrag);
 $('#noteTitle').addEventListener('blur', saveActiveNote);
 $('#noteEditor').addEventListener('blur', saveActiveNote);
 $('#noteTitle').addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('#noteTitleEmojiMenu').hidden) {
+    event.preventDefault();
+    closeNoteTitleEmojiMenu();
+    return;
+  }
   if (event.key !== 'Enter') return;
   event.preventDefault();
   $('#noteEditor').focus();
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || $('#noteTitleEmojiMenu').hidden) return;
+  event.preventDefault();
+  closeNoteTitleEmojiMenu();
+  $('#noteTitle').focus({ preventScroll: true });
 });
 $('#noteEditor').addEventListener('paste', event => {
   closeNoteSlashMenu();
@@ -3452,6 +5336,21 @@ $('#noteEditor').addEventListener('paste', event => {
 $('#noteEditor').addEventListener('dragstart', event => {
   const figure = event.target.closest?.('figure');
   if (!figure || !event.target.closest('img')) return;
+  const sourceCell = figure.closest('td, th');
+  if (sourceCell) {
+    nativeNoteTableContentDrag = {
+      table: sourceCell.closest('table.note-table'),
+      sourceCell,
+      targetCell: null
+    };
+    sourceCell.classList.add('note-table-content-drag-source');
+    noteImageWasDragged = true;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/x-mos-note-table-cell', 'move');
+    $('#noteSelectionBubble').hidden = true;
+    hideNoteTableContentDragHandle();
+    return;
+  }
   draggedNoteFigure = figure;
   noteImageWasDragged = true;
   figure.classList.add('dragging');
@@ -3460,6 +5359,13 @@ $('#noteEditor').addEventListener('dragstart', event => {
   $('#noteSelectionBubble').hidden = true;
 });
 $('#noteEditor').addEventListener('dragover', event => {
+  if (nativeNoteTableContentDrag) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const target = event.target.closest?.('td, th');
+    setNoteTableContentDropTarget(nativeNoteTableContentDrag, target);
+    return;
+  }
   if (draggedNoteBlock) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -3482,9 +5388,21 @@ $('#noteEditor').addEventListener('dragover', event => {
   updateNoteDropIndicator(event.clientX, event.clientY, event.target.closest?.('figure'));
 });
 $('#noteEditor').addEventListener('dragleave', event => {
-  if (!$('#noteEditor').contains(event.relatedTarget)) hideNoteDropIndicator();
+  if (!$('#noteEditor').contains(event.relatedTarget)) {
+    if (nativeNoteTableContentDrag) setNoteTableContentDropTarget(nativeNoteTableContentDrag, null);
+    hideNoteDropIndicator();
+  }
 });
 $('#noteEditor').addEventListener('drop', event => {
+  if (nativeNoteTableContentDrag) {
+    event.preventDefault();
+    const state = nativeNoteTableContentDrag;
+    nativeNoteTableContentDrag = null;
+    if (state.targetCell) swapNoteTableCellContents(state.sourceCell, state.targetCell);
+    clearNoteTableContentDrag(state);
+    noteImageWasDragged = true;
+    return;
+  }
   if (draggedNoteBlock) {
     event.preventDefault();
     commitNoteBlockDrop();
@@ -3521,6 +5439,10 @@ $('#noteEditor').addEventListener('drop', event => {
   else insertNoteImageUrl(imageUrl, '拖入的图片', placement);
 });
 document.addEventListener('dragend', () => {
+  if (nativeNoteTableContentDrag) {
+    clearNoteTableContentDrag(nativeNoteTableContentDrag);
+    nativeNoteTableContentDrag = null;
+  }
   finishNoteBlockDrag();
   draggedNoteFigure?.classList.remove('dragging');
   draggedNoteFigure = null;
@@ -3571,7 +5493,7 @@ document.addEventListener('pointerdown', event => {
 document.addEventListener('selectionchange', () => {
   rememberNoteCaret();
   const tableCell = noteTableCellFromSelection();
-  if (tableCell) showNoteTableTools(tableCell);
+  if (tableCell && !noteTablePointerSelection?.active && activeNoteTableCells.length <= 1) showNoteTableTools(tableCell);
   const bubble = $('#noteSelectionBubble');
   if (noteSelectionPointerActive) {
     bubble.hidden = true;
@@ -3604,6 +5526,11 @@ $('#noteEditor').addEventListener('keydown', event => {
     event.preventDefault();
     closeNoteTablePicker();
     $('#noteEditor').focus();
+    return;
+  }
+  if (event.key === 'Escape' && activeNoteTableCells.length > 1 && activeNoteTableCell?.isConnected) {
+    event.preventDefault();
+    showNoteTableTools(activeNoteTableCell);
     return;
   }
   if (handleNoteTableTab(event)) return;
@@ -3746,7 +5673,8 @@ async function galleryItemFromDrop(dataTransfer) {
   const imageFile = [...dataTransfer.files].find(file => file.type.startsWith('image/'));
   if (imageFile) {
     if (imageFile.size > 12 * 1024 * 1024) throw new Error('图片文件请控制在 12MB 以内');
-    return { image: await readGalleryImageFile(imageFile), title: galleryDropTitle(imageFile.name), source: '' };
+    const image = await readGalleryImageFile(imageFile);
+    return { image: await uploadCloudImage(image, imageFile.name || 'gallery-image'), title: galleryDropTitle(imageFile.name), source: '' };
   }
 
   const html = dataTransfer.getData('text/html');
@@ -3772,7 +5700,7 @@ function acceptsGalleryDrop(dataTransfer) {
 
 function acceptsBookmarkDrop(dataTransfer) {
   const types = [...(dataTransfer?.types || [])];
-  return types.some(type => ['text/html', 'text/uri-list', 'text/plain', 'text/x-moz-url'].includes(type));
+  return types.some(type => ['Files', 'text/html', 'text/uri-list', 'text/plain', 'text/x-moz-url'].includes(type));
 }
 
 function normalizeDroppedWebsiteUrl(value) {
@@ -3785,6 +5713,279 @@ function normalizeDroppedWebsiteUrl(value) {
     return parsed.href;
   } catch {
     return '';
+  }
+}
+
+function directChildByTag(element, tagName) {
+  return [...(element?.children || [])].find(child => child.tagName === tagName) || null;
+}
+
+function parseBrowserBookmarks(html) {
+  const documentNode = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  const entries = [];
+
+  const addAnchor = (anchor, folderPath) => {
+    const url = normalizeDroppedWebsiteUrl(anchor?.getAttribute('href') || anchor?.href);
+    if (!url) return;
+    const parsed = new URL(url);
+    const fallbackName = parsed.hostname.replace(/^www\./, '').split('.')[0] || '新网站';
+    const name = String(anchor.textContent || anchor.getAttribute('title') || fallbackName).replace(/\s+/g, ' ').trim().slice(0, 80) || fallbackName;
+    entries.push({ name, url, folderPath: folderPath.filter(Boolean) });
+  };
+
+  const walkList = (list, folderPath = []) => {
+    const children = [...(list?.children || [])];
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      if (child.tagName === 'DL') {
+        walkList(child, folderPath);
+        continue;
+      }
+      if (child.tagName !== 'DT') continue;
+
+      const anchor = directChildByTag(child, 'A');
+      if (anchor) addAnchor(anchor, folderPath);
+
+      const heading = directChildByTag(child, 'H3');
+      if (!heading) continue;
+      const folderName = String(heading.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      let nestedList = directChildByTag(child, 'DL');
+      if (!nestedList && children[index + 1]?.tagName === 'DL') nestedList = children[++index];
+      if (nestedList) walkList(nestedList, folderName ? [...folderPath, folderName] : folderPath);
+    }
+  };
+
+  const rootList = documentNode.querySelector('dl');
+  if (rootList) walkList(rootList);
+  if (!entries.length) documentNode.querySelectorAll('a[href]').forEach(anchor => addAnchor(anchor, []));
+
+  const commonRoot = entries[0]?.folderPath[0];
+  const hasGenericRoot = commonRoot
+    && entries.every(entry => entry.folderPath[0] === commonRoot)
+    && /^(bookmarks?|favorites?|书签|收藏夹)$/i.test(commonRoot)
+    && entries.some(entry => entry.folderPath.length > 1);
+  if (hasGenericRoot) entries.forEach(entry => { entry.folderPath = entry.folderPath.slice(1); });
+  return entries;
+}
+
+function bookmarkUrlKey(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    return parsed.href.replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function importedCategoryName(folderPath, fileName) {
+  const folderName = String(folderPath[0] || '').trim();
+  if (folderName) return folderName.slice(0, 24);
+  const browserName = /safari/i.test(fileName) ? 'Safari' : /firefox/i.test(fileName) ? 'Firefox' : /edge/i.test(fileName) ? 'Edge' : /chrome|bookmarks?/i.test(fileName) ? 'Chrome' : '浏览器';
+  return `${browserName}导入`;
+}
+
+function importBookmarkEntries(parsedEntries, sourceName = '') {
+  if (!parsedEntries.length) throw new Error('文件中没有识别到可导入的书签');
+
+  const previousState = {
+    customSites,
+    customCategories,
+    siteOrder,
+    siteGroups
+  };
+  const nextSites = [...customSites];
+  const nextCategories = [...customCategories];
+  const nextOrder = [...siteOrder];
+  const nextGroups = siteGroups.map(group => ({ ...group, siteIds: [...group.siteIds] }));
+  const existingUrls = new Set([...baseSites, ...customSites].map(site => bookmarkUrlKey(site.url)).filter(Boolean));
+  const categoryLookup = new Map([...builtInCategories, ...nextCategories].map(category => [category.name.toLocaleLowerCase('zh-CN'), category]));
+  const imported = [];
+  let duplicateCount = 0;
+  let unsupportedCount = 0;
+  const importStamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  parsedEntries.forEach((entry, index) => {
+    const urlKey = bookmarkUrlKey(entry.url);
+    if (!urlKey) {
+      unsupportedCount += 1;
+      return;
+    }
+    if (existingUrls.has(urlKey)) {
+      duplicateCount += 1;
+      return;
+    }
+    existingUrls.add(urlKey);
+
+    const categoryName = importedCategoryName(entry.folderPath, sourceName);
+    const categoryKey = categoryName.toLocaleLowerCase('zh-CN');
+    let category = categoryLookup.get(categoryKey);
+    if (!category || category.id === 'all') {
+      category = { id: `category-import-${importStamp}-${nextCategories.length}`, name: categoryName, icon: categoryName.slice(0, 1), custom: true };
+      nextCategories.push(category);
+      categoryLookup.set(categoryKey, category);
+    }
+
+    const normalized = new URL(entry.url);
+    const hostname = normalized.hostname.replace(/^www\./, '');
+    const id = `custom-import-${importStamp}-${index}`;
+    const name = entry.name.slice(0, 36);
+    nextSites.push({
+      id,
+      name,
+      url: normalized.href,
+      desc: entry.folderPath.length ? entry.folderPath.join(' / ').slice(0, 100) : hostname,
+      category: category.id,
+      color: ['#7c6cf2', '#e56788', '#37a986', '#dd8b45'][(nextSites.length + index) % 4],
+      icon: name.slice(0, 1).toUpperCase(),
+      custom: true
+    });
+    nextOrder.push(id);
+    imported.push({ id, categoryId: category.id, folderPath: entry.folderPath });
+  });
+
+  if (!imported.length) {
+    if (duplicateCount) throw new Error(`文件中的 ${duplicateCount} 个书签都已存在`);
+    throw new Error('文件中没有可导入的 HTTP 或 HTTPS 书签');
+  }
+
+  const groupLookup = new Map();
+  imported.forEach(item => {
+    const nestedFolders = item.folderPath.slice(1);
+    let parentId = null;
+    let deepestGroup = null;
+    nestedFolders.forEach((folderName, folderIndex) => {
+      const pathKey = `${item.categoryId}\u0000${nestedFolders.slice(0, folderIndex + 1).join('\u0000')}`;
+      let group = groupLookup.get(pathKey);
+      if (!group) {
+        group = {
+          id: `group-import-${importStamp}-${groupLookup.size}`,
+          name: String(folderName || '未命名文件夹').slice(0, 36),
+          siteIds: [],
+          parentId
+        };
+        groupLookup.set(pathKey, group);
+        nextGroups.push(group);
+      }
+      parentId = group.id;
+      deepestGroup = group;
+    });
+    deepestGroup?.siteIds.push(item.id);
+  });
+
+  try {
+    customSites = nextSites;
+    customCategories = nextCategories;
+    siteOrder = nextOrder;
+    siteGroups = nextGroups;
+    store.set('mos-custom-sites', customSites);
+    store.set('mos-custom-categories', customCategories);
+    store.set('mos-site-order', siteOrder);
+    persistGroups();
+  } catch {
+    customSites = previousState.customSites;
+    customCategories = previousState.customCategories;
+    siteOrder = previousState.siteOrder;
+    siteGroups = previousState.siteGroups;
+    throw new Error('本地存储空间不足，请减少导入数量后重试');
+  }
+
+  currentCategory = new Set(imported.map(item => item.categoryId)).size === 1 ? imported[0].categoryId : 'all';
+  searchQuery = '';
+  $('#searchInput').value = '';
+  renderCategoryOptions();
+  renderSites();
+  return { importedCount: imported.length, duplicateCount, unsupportedCount };
+}
+
+function importBrowserBookmarks(html, fileName = '') {
+  return importBookmarkEntries(parseBrowserBookmarks(html), fileName);
+}
+
+async function importBookmarkFile(file) {
+  if (!file) return;
+  if (!/\.html?$/i.test(file.name) && !/html/i.test(file.type)) throw new Error('请选择浏览器导出的 HTML 书签文件');
+  if (file.size > 12 * 1024 * 1024) throw new Error('书签文件请控制在 12MB 以内');
+  const result = importBrowserBookmarks(await file.text(), file.name);
+  const skipped = result.duplicateCount + result.unsupportedCount;
+  showToast(`已导入 ${result.importedCount} 个书签${skipped ? `，跳过 ${skipped} 个` : ''}`, { duration: 4200 });
+}
+
+async function localBookmarkRequest(endpoint, options = {}) {
+  let response;
+  try {
+    response = await fetch(`/api/local-bookmarks/${endpoint}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    });
+  } catch {
+    throw new Error('本机书签连接未启动，请通过 npm run dev 或 npm run preview 打开项目');
+  }
+  let payload = {};
+  try { payload = await response.json(); } catch { payload = {}; }
+  if (!response.ok) throw new Error(payload.error || '本机书签读取失败');
+  return payload;
+}
+
+function renderLocalBookmarkProfiles(profiles) {
+  const results = $('#bookmarkLocalResults');
+  const profileList = $('#bookmarkLocalProfiles');
+  const readyProfiles = profiles.filter(profile => profile.status === 'ready' && profile.count > 0);
+  const blockedProfiles = profiles.filter(profile => profile.status === 'blocked');
+  results.hidden = false;
+  $('#bookmarkLocalStatus').textContent = profiles.length
+    ? `检测到 ${profiles.length} 个浏览器用户${readyProfiles.length ? `，${readyProfiles.length} 个可导入` : ''}`
+    : '没有检测到可读取的浏览器书签';
+  profileList.innerHTML = profiles.map(profile => {
+    const ready = profile.status === 'ready' && profile.count > 0;
+    const detail = profile.status === 'blocked' ? profile.message : profile.count ? `${profile.count} 个书签` : '没有可导入的书签';
+    return `<label class="bookmark-local-profile ${profile.status === 'blocked' ? 'blocked' : ''}">
+      <input type="checkbox" value="${escapeHTML(profile.id)}" ${ready ? '' : 'disabled'} />
+      <span><strong>${escapeHTML(profile.browserName)} · ${escapeHTML(profile.profileName)}</strong><small>${escapeHTML(detail)}</small></span>
+      ${ready ? `<b>${profile.count}</b>` : ''}
+    </label>`;
+  }).join('');
+  $('#importLocalBookmarks').disabled = true;
+  if (!profiles.length || (!readyProfiles.length && !blockedProfiles.length)) profileList.innerHTML = '';
+}
+
+async function scanLocalBookmarks() {
+  const button = $('#scanLocalBookmarks');
+  const results = $('#bookmarkLocalResults');
+  button.disabled = true;
+  button.querySelector('strong').textContent = '正在扫描…';
+  results.hidden = false;
+  $('#bookmarkLocalStatus').textContent = '正在检查这台 Mac 上的浏览器用户…';
+  $('#bookmarkLocalProfiles').innerHTML = '';
+  try {
+    const payload = await localBookmarkRequest('profiles');
+    if (payload.platform !== 'darwin') throw new Error('当前本机扫描版本先支持 macOS');
+    renderLocalBookmarkProfiles(payload.profiles || []);
+  } catch (error) {
+    $('#bookmarkLocalStatus').textContent = error.message || '本机浏览器扫描失败';
+  } finally {
+    button.disabled = false;
+    button.querySelector('strong').textContent = '重新扫描本机浏览器';
+  }
+}
+
+async function importSelectedLocalBookmarks() {
+  const button = $('#importLocalBookmarks');
+  const profileIds = $$('#bookmarkLocalProfiles input:checked').map(input => input.value);
+  if (!profileIds.length) return;
+  button.disabled = true;
+  button.textContent = '正在读取与导入…';
+  try {
+    const payload = await localBookmarkRequest('read', { method: 'POST', body: JSON.stringify({ profileIds }) });
+    const result = importBookmarkEntries(payload.entries || [], '本机浏览器');
+    const skipped = result.duplicateCount + result.unsupportedCount;
+    bookmarkImportDialog.close();
+    showToast(`已从本机导入 ${result.importedCount} 个书签${skipped ? `，跳过 ${skipped} 个` : ''}`, { duration: 4400 });
+  } catch (error) {
+    showToast(error.message || '本机书签导入失败', { duration: 4200 });
+    button.disabled = false;
+  } finally {
+    button.textContent = '导入选中书签';
   }
 }
 
@@ -3829,6 +6030,11 @@ function clearBookmarkDropState() {
 }
 
 function updateBookmarkDropTarget(event) {
+  if ([...(event.dataTransfer?.types || [])].includes('Files')) {
+    $$('.category-tabs .bookmark-drop-target').forEach(item => item.classList.remove('bookmark-drop-target'));
+    $('#bookmarkDropTitle').textContent = '松开导入浏览器书签';
+    return;
+  }
   const tab = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-category]');
   $$('.category-tabs .bookmark-drop-target').forEach(item => item.classList.toggle('bookmark-drop-target', item === tab));
   $('#bookmarkDropTitle').textContent = `导入到「${bookmarkDropTargetLabel(event)}」`;
@@ -3853,12 +6059,17 @@ document.addEventListener('dragleave', event => {
   bookmarkDragDepth = Math.max(0, bookmarkDragDepth - 1);
   if (bookmarkDragDepth === 0) clearBookmarkDropState();
 });
-document.addEventListener('drop', event => {
+document.addEventListener('drop', async event => {
   if ($('#bookmarksView').hidden || document.querySelector('dialog[open]') || !acceptsBookmarkDrop(event.dataTransfer)) return;
   event.preventDefault();
   const category = bookmarkDropCategory(event);
   clearBookmarkDropState();
   try {
+    const bookmarkFile = [...event.dataTransfer.files].find(file => /\.html?$/i.test(file.name) || /html/i.test(file.type));
+    if (bookmarkFile) {
+      await importBookmarkFile(bookmarkFile);
+      return;
+    }
     const dropped = websiteFromDrop(event.dataTransfer);
     const normalized = new URL(dropped.url);
     const duplicate = allSites().find(site => {
@@ -4169,6 +6380,33 @@ function setSplashCursorEnabled(enabled, { notify = false } = {}) {
 
 $('#splashCursorToggle').addEventListener('click', () => {
   setSplashCursorEnabled(!splashCursorEnabled, { notify: true });
+});
+
+const bookmarkImportDialog = $('#bookmarkImportDialog');
+const bookmarkImportInput = $('#bookmarkImportInput');
+if (!import.meta.env.DEV) {
+  $('#scanLocalBookmarks').hidden = true;
+  $('#bookmarkLocalResults').hidden = true;
+  $('.bookmark-import-divider').hidden = true;
+  $('.bookmark-import-heading p').textContent = '请选择浏览器导出的书签 HTML 文件，数据会在当前浏览器中解析。';
+}
+$('#scanLocalBookmarks').addEventListener('click', scanLocalBookmarks);
+$('#bookmarkLocalProfiles').addEventListener('change', () => {
+  $('#importLocalBookmarks').disabled = !$('#bookmarkLocalProfiles input:checked');
+});
+$('#importLocalBookmarks').addEventListener('click', importSelectedLocalBookmarks);
+$('#chooseBookmarkFile').addEventListener('click', () => bookmarkImportInput.click());
+$('#cancelBookmarkImport').addEventListener('click', () => bookmarkImportDialog.close());
+bookmarkImportInput.addEventListener('change', async () => {
+  const file = bookmarkImportInput.files?.[0];
+  bookmarkImportInput.value = '';
+  if (!file) return;
+  try {
+    await importBookmarkFile(file);
+    bookmarkImportDialog.close();
+  } catch (error) {
+    showToast(error.message || '书签导入失败', { duration: 3600 });
+  }
 });
 
 const dialog = $('#addDialog');
@@ -4545,8 +6783,7 @@ function userInitials(user) {
 
 function renderAuthState() {
   const signedIn = Boolean(currentUser);
-  const isWechat = currentUser?.provider === 'wechat';
-  const accountLabel = isWechat ? '微信账号' : currentUser?.email || '尚未登录';
+  const accountLabel = currentUser?.email || '尚未登录';
   if (signedIn && currentUser.email) store.set('mos-last-login-email', currentUser.email);
   $('#authGuestView').hidden = signedIn;
   $('#authUserView').hidden = !signedIn;
@@ -4679,6 +6916,7 @@ $('#authForm').addEventListener('submit', async event => {
       currentUser = await login(email, password);
       await rememberSuccessfulCredential(email, password);
       renderAuthState();
+      await initializeCloudWorkspace({ announce: true });
       authDialog.close();
       showToast('登录成功');
     } else {
@@ -4687,6 +6925,7 @@ $('#authForm').addEventListener('submit', async event => {
         currentUser = user;
         await rememberSuccessfulCredential(email, password);
         renderAuthState();
+        await initializeCloudWorkspace({ announce: true });
         authDialog.close();
         showToast('账号创建成功');
       } else {
@@ -4699,13 +6938,6 @@ $('#authForm').addEventListener('submit', async event => {
     submit.disabled = false;
     submit.textContent = authMode === 'login' ? '登录' : '创建账号';
   }
-});
-$('#wechatLogin').addEventListener('click', () => {
-  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
-    setAuthMessage('微信扫码登录需要部署到 Netlify，并配置微信开放平台参数。');
-    return;
-  }
-  location.assign('/api/auth/wechat/start');
 });
 $('#savedCredentialLogin').addEventListener('click', async () => {
   if (!window.PasswordCredential || !navigator.credentials?.get) {
@@ -4727,6 +6959,7 @@ $('#savedCredentialLogin').addEventListener('click', async () => {
     currentUser = await login(credential.id, credential.password);
     await rememberSuccessfulCredential(credential.id, credential.password);
     renderAuthState();
+    await initializeCloudWorkspace({ announce: true });
     authDialog.close();
     showToast('登录成功');
   } catch (error) {
@@ -4738,13 +6971,9 @@ $('#savedCredentialLogin').addEventListener('click', async () => {
 });
 async function performLogout() {
   try {
-    if (currentUser?.provider === 'wechat') {
-      const response = await fetch('/api/auth/wechat/logout', { method: 'POST' });
-      if (!response.ok) throw new Error('微信退出登录失败');
-    } else {
-      await logout();
-    }
+    await logout();
     currentUser = null;
+    resetCloudWorkspaceSession();
     renderAuthState();
     authDialog.close();
     closeAccountMenu();
@@ -4759,12 +6988,6 @@ $('#accountMenuLogout').addEventListener('click', performLogout);
 
 async function initializeAuth() {
   try {
-    const wechatStatus = new URLSearchParams(location.search).get('wechat_login');
-    const wechatResponse = await fetch('/api/auth/wechat/session', { headers: { Accept: 'application/json' } }).catch(() => null);
-    if (wechatResponse?.ok) {
-      const session = await wechatResponse.json();
-      if (session.user) currentUser = session.user;
-    }
     const callback = await handleAuthCallback();
     if (callback?.user) {
       currentUser = callback.user;
@@ -4772,27 +6995,18 @@ async function initializeAuth() {
     } else if (!currentUser) {
       currentUser = await getUser();
     }
-    if (wechatStatus) {
-      const messages = {
-        success: '微信登录成功',
-        config: '微信登录尚未完成开放平台配置',
-        state: '微信登录状态已过期，请重新扫码',
-        denied: '微信授权未完成',
-        profile: '暂时无法读取微信账号信息',
-        network: '微信登录网络异常，请稍后重试'
-      };
-      showToast(messages[wechatStatus] || '微信登录未完成');
-      history.replaceState({}, '', `${location.pathname}${location.hash}`);
-    }
   } catch (error) {
     if (!(error instanceof MissingIdentityError)) showToast(readableAuthError(error));
   }
   renderAuthState();
-  onAuthChange((_event, user) => {
-    if (currentUser?.provider === 'wechat' && !user) return;
+  await initializeCloudWorkspace();
+  onAuthChange(async (_event, user) => {
     currentUser = user;
     renderAuthState();
+    if (user) await initializeCloudWorkspace();
+    else resetCloudWorkspaceSession();
   });
+  await loadSharedNoteFromLocation();
 }
 
 applyTheme(store.get('mos-light-theme', false) ? 'light' : 'dark');
