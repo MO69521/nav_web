@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_WORKSPACE_BYTES, normalizeWorkspace } from '../netlify/functions/_shared/workspace.mjs';
 import { normalizeSharedNote, normalizeSharePermission, normalizeShareToken } from '../netlify/functions/_shared/note-share.mjs';
-import { rejectCrossSiteRequest } from '../netlify/functions/_shared/auth.mjs';
+import { currentWorkspaceUser, rejectCrossSiteRequest } from '../netlify/functions/_shared/auth.mjs';
 import { createShareToken, isSafeNoteImageSource } from '../cloud-content.js';
 
 test('workspace normalization keeps supported collections and settings', () => {
@@ -57,4 +57,23 @@ test('cross-site mutation requests are rejected', async () => {
     method: 'PUT',
     headers: { Origin: 'https://mos.example', 'Sec-Fetch-Site': 'same-origin' }
   })), null);
+});
+
+test('workspace auth validates an explicit Identity bearer token', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(new URL(url).pathname, '/.netlify/identity/user');
+    assert.equal(options.headers.Authorization, 'Bearer valid-test-token');
+    return Response.json({ id: 'identity-user-1', email: 'user@example.com' });
+  };
+  try {
+    const user = await currentWorkspaceUser(new Request('https://example.com/api/workspace', {
+      headers: { Authorization: 'Bearer valid-test-token' }
+    }));
+    assert.equal(user.id, 'identity-user-1');
+    assert.equal(user.email, 'user@example.com');
+    assert.equal(user.provider, 'identity');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

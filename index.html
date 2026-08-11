@@ -30,10 +30,10 @@
           <div class="top-actions">
             <button class="icon-btn search-trigger" id="openSearch" type="button" aria-label="打开搜索" title="搜索"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 3 3"></path></svg></button>
             <div class="account-control">
-              <button class="avatar" id="accountButton" type="button" aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" title="账户与设置"><span id="avatarText">MO</span></button>
+              <button class="avatar" id="accountButton" type="button" aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" title="账户与设置"><img class="avatar-image" id="avatarImage" alt="" hidden /><svg class="avatar-guest-icon" id="avatarGuestIcon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5.5 19c.7-3.3 3.1-5 6.5-5s5.8 1.7 6.5 5"></path></svg><span id="avatarText" hidden></span></button>
               <div class="theme-popover" id="accountMenu" role="menu" aria-label="账户与设置">
                 <div class="account-menu-profile">
-                  <span class="account-menu-avatar" id="accountMenuAvatar">MO</span>
+                  <span class="account-menu-avatar" id="accountMenuAvatar"><img class="avatar-image" id="accountMenuAvatarImage" alt="" hidden /><span id="accountMenuAvatarText">MO</span></span>
                   <span><strong id="accountMenuName">访客模式</strong><small id="accountMenuEmail">尚未登录</small></span>
                 </div>
                 <button class="account-menu-action primary" id="accountMenuLogin" type="button">登录 / 创建账号</button>
@@ -44,8 +44,8 @@
                   <button type="button" data-theme="light" aria-pressed="false"><i class="theme-preview light"></i><span>浅色</span></button>
                 </div>
                 <div class="theme-setting-row">
-                  <span><strong>鼠标流体</strong><small>移动时显示飞溅效果</small></span>
-                  <button class="setting-switch" id="splashCursorToggle" type="button" role="switch" aria-checked="true" aria-label="关闭鼠标流体效果"><i></i></button>
+                  <span><strong>鼠标效果</strong><small>移动时显示跟随效果</small></span>
+                  <button class="setting-switch" id="splashCursorToggle" type="button" role="switch" aria-checked="true" aria-label="关闭鼠标效果"><i></i></button>
                 </div>
               </div>
             </div>
@@ -356,15 +356,15 @@
       <form id="authForm">
         <div class="dialog-heading"><div><span class="section-kicker">PERSONAL ACCOUNT</span><h2 id="authTitle">邮箱登录</h2></div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button></div>
         <div id="authGuestView">
-          <button class="saved-credential-login" id="savedCredentialLogin" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7a4 4 0 1 1-7.7 1.5A4 4 0 0 1 15 7Z"></path><path d="m14 10 7 7-2 2-1.5-1.5-1.5 1.5-2-2 1.5-1.5-3.2-3.2"></path></svg><span id="savedCredentialText">使用已保存账号一键登录</span></button>
+          <p class="auth-intro" id="authIntro">已有账号直接登录，首次使用将自动创建账号。</p>
           <label>邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username" placeholder="you@example.com" /></label>
           <label>密码<input id="authPassword" name="password" required type="password" minlength="6" autocomplete="current-password" placeholder="至少 6 位密码" /></label>
+          <div class="auth-help"><button type="button" id="authForgotPassword">忘记密码？</button></div>
           <p class="auth-message" id="authMessage" role="status"></p>
-          <div class="auth-switch"><span id="authSwitchHint">还没有账号？</span><button type="button" id="authSwitchMode">创建账号</button></div>
-          <button class="auth-submit" id="authSubmit" type="submit">登录</button>
+          <button class="auth-submit" id="authSubmit" type="submit">继续</button>
         </div>
         <div class="auth-user-view" id="authUserView" hidden>
-          <span class="auth-user-avatar" id="authUserAvatar">MO</span>
+          <span class="auth-user-avatar" id="authUserAvatar"><img class="avatar-image" id="authUserAvatarImage" alt="" hidden /><span id="authUserAvatarText">MO</span></span>
           <strong id="authUserEmail"></strong>
           <p>当前邮箱账号已登录。</p>
           <button class="auth-logout" id="authLogout" type="button">退出登录</button>

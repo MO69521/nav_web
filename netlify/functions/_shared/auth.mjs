@@ -6,7 +6,13 @@ function storageId(provider, id) {
 }
 
 export async function currentWorkspaceUser(request) {
-  const identityUser = await getUser().catch(() => null);
+  let identityUser = await getUser().catch(() => null);
+  const authorization = request.headers.get('authorization');
+  if (!identityUser?.id && authorization?.startsWith('Bearer ')) {
+    const identityURL = new URL('/.netlify/identity/user', request.url);
+    const response = await fetch(identityURL, { headers: { Authorization: authorization } }).catch(() => null);
+    if (response?.ok) identityUser = await response.json().catch(() => null);
+  }
   if (identityUser?.id) {
     return {
       id: identityUser.id,

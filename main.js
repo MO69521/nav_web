@@ -8,7 +8,7 @@ import { createApp, h, reactive } from 'vue';
 import SplashCursor from './SplashCursor.vue';
 import CircularGallery from './CircularGallery.vue';
 import LineSidebar from './LineSidebar.vue';
-import { AuthError, MissingIdentityError, getUser, handleAuthCallback, login, logout, onAuthChange, signup } from '@netlify/identity';
+import { AuthError, MissingIdentityError, getUser, handleAuthCallback, login, logout, onAuthChange, requestPasswordRecovery, signup } from '@netlify/identity';
 
 const baseSites = [
   { id: 'figma', name: 'Figma', url: 'https://www.figma.com', desc: '协作式界面设计工具', category: 'design', color: '#f05b42', icon: 'F' },
@@ -86,6 +86,16 @@ const store = {
   }
 };
 
+function authHeaders(headers = {}) {
+  const encodedToken = document.cookie
+    .split('; ')
+    .find(entry => entry.startsWith('nf_jwt='))
+    ?.slice('nf_jwt='.length);
+  return encodedToken
+    ? { ...headers, Authorization: `Bearer ${decodeURIComponent(encodedToken)}` }
+    : headers;
+}
+
 let customSites = store.get('mos-custom-sites', []);
 let customCategories = store.get('mos-custom-categories', []);
 let hiddenBuiltInCategories = new Set(store.get('mos-hidden-built-in-categories', []).filter(id => id !== 'all'));
@@ -102,7 +112,6 @@ let currentEngine = engines[0];
 let searchQuery = '';
 let activeGroupId = null;
 let currentUser = null;
-let authMode = 'login';
 let galleryItems = store.get('mos-gallery-items', defaultGalleryItems);
 if (store.get('mos-gallery-anime-placeholder-version', 0) < 2) {
   const defaultGalleryItemMap = new Map(defaultGalleryItems.map(item => [item.id, item]));
@@ -279,8 +288,8 @@ function applyCloudWorkspace(workspace) {
     splashCursorEnabled = settings.splashCursorEnabled !== false;
     applyTheme(settings.lightTheme ? 'light' : 'dark');
     setSplashCursorEnabled(splashCursorEnabled);
-    applyStoredNoteColumnWidths();
-    applyNoteOutlineCollapsedState({ persist: false });
+    applySavedNoteColumnWidths();
+    setNoteOutlineCollapsed(noteOutlineCollapsed, { persist: false });
     if (sharedViewActive) activeNoteId = activeSharedNote.id;
     renderCategoryOptions();
     renderSites();
@@ -291,11 +300,27 @@ function applyCloudWorkspace(workspace) {
   }
 }
 
+function mergeWorkspaceDocuments(localWorkspace, cloudWorkspace) {
+  const mergedNotes = new Map();
+  for (const note of normalizeCloudNotes(cloudWorkspace?.notes)) mergedNotes.set(note.id, note);
+  for (const note of normalizeCloudNotes(localWorkspace?.notes)) {
+    const cloudNote = mergedNotes.get(note.id);
+    if (!cloudNote || Number(note.updatedAt) >= Number(cloudNote.updatedAt)) mergedNotes.set(note.id, note);
+  }
+  const notes = [...mergedNotes.values()];
+  const localActiveId = localWorkspace?.activeNoteId;
+  return {
+    ...cloudWorkspace,
+    notes,
+    activeNoteId: notes.some(note => note.id === localActiveId) ? localActiveId : cloudWorkspace?.activeNoteId
+  };
+}
+
 async function putCloudWorkspace(workspace = cloudWorkspaceSnapshot()) {
   const response = await fetch('/api/workspace', {
     method: 'PUT',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }),
     body: JSON.stringify({ workspace })
   });
   if (!response.ok) throw new Error(response.status === 413 ? '云端工作区容量已满' : '云端保存失败');
@@ -360,10 +385,14 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
   cloudWorkspaceUserKey = userKey;
   cloudWorkspaceInitPromise = (async () => {
     try {
-      const response = await fetch('/api/workspace', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      const response = await fetch('/api/workspace', { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
       if (!response.ok) throw new Error(response.status === 401 ? '登录状态已过期' : '云端工作区读取失败');
       const payload = await response.json();
-      if (payload.workspace) applyCloudWorkspace(payload.workspace);
+      if (payload.workspace) {
+        const mergedWorkspace = mergeWorkspaceDocuments(cloudWorkspaceSnapshot(), payload.workspace);
+        applyCloudWorkspace(mergedWorkspace);
+        await putCloudWorkspace(mergedWorkspace);
+      }
       else {
         const migratedWorkspace = await migrateWorkspaceImagesToCloud(cloudWorkspaceSnapshot());
         applyCloudWorkspace(migratedWorkspace);
@@ -656,7 +685,7 @@ async function publishNoteShare(note) {
   const response = await fetch(`/api/shares/${encodeURIComponent(token)}`, {
     method: 'PUT',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }),
     body: JSON.stringify({ note: sharedNotePayload(note), permission: note.sharing.permission })
   });
   if (!response.ok) throw new Error(response.status === 413 ? '文档过大，暂时无法分享' : '分享内容发布失败');
@@ -664,7 +693,7 @@ async function publishNoteShare(note) {
 
 async function removeNoteShare(note) {
   if (!note?.sharing?.token || !currentUser) return;
-  const response = await fetch(`/api/shares/${encodeURIComponent(note.sharing.token)}`, { method: 'DELETE', credentials: 'same-origin' });
+  const response = await fetch(`/api/shares/${encodeURIComponent(note.sharing.token)}`, { method: 'DELETE', credentials: 'same-origin', headers: authHeaders() });
   if (!response.ok && response.status !== 404) throw new Error('关闭分享失败');
 }
 
@@ -1787,7 +1816,7 @@ async function uploadCloudImage(source, filename = 'image') {
   if (!currentUser || !String(source).startsWith('data:image/')) return source;
   const form = new FormData();
   form.append('file', dataUrlToBlob(source), filename);
-  const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', body: form });
+  const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', headers: authHeaders(), body: form });
   if (!response.ok) throw new Error(response.status === 413 ? '图片过大，请压缩后重试' : '图片上传失败');
   const payload = await response.json();
   return payload.url;
@@ -5456,10 +5485,6 @@ $('#noteEditor').addEventListener('click', event => {
   openNoteImagePreview(image);
 });
 $('#noteImagePreview').addEventListener('click', event => {
-  if (event.target === $('#noteImagePreview')) {
-    $('#noteImagePreview').close();
-    return;
-  }
   if (event.target === $('#noteImagePreviewSource')) {
     event.target.classList.toggle('zoomed');
     $('#noteImagePreview').classList.toggle('zoomed', event.target.classList.contains('zoomed'));
@@ -6205,7 +6230,6 @@ $('#galleryGrid').addEventListener('click', event => {
 $('#closeGalleryLightbox').addEventListener('click', () => galleryLightbox.close());
 $('#galleryLightboxPrev').addEventListener('click', () => moveGalleryLightbox(-1));
 $('#galleryLightboxNext').addEventListener('click', () => moveGalleryLightbox(1));
-galleryLightbox.addEventListener('click', event => { if (event.target === galleryLightbox) galleryLightbox.close(); });
 galleryLightbox.addEventListener('keydown', event => {
   if (event.key === 'ArrowLeft') { event.preventDefault(); moveGalleryLightbox(-1); }
   if (event.key === 'ArrowRight') { event.preventDefault(); moveGalleryLightbox(1); }
@@ -6234,7 +6258,6 @@ $('#openGalleryAdd').addEventListener('click', () => {
 });
 $('#closeGalleryAdd').addEventListener('click', () => galleryAddDialog.close());
 $('#cancelGalleryAdd').addEventListener('click', () => galleryAddDialog.close());
-galleryAddDialog.addEventListener('click', event => { if (event.target === galleryAddDialog) galleryAddDialog.close(); });
 $('#galleryAddForm').addEventListener('submit', event => {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
@@ -6278,9 +6301,6 @@ function closeSearchDialog() {
 
 $('#openSearch').addEventListener('click', openSearchDialog);
 $('#closeSearch').addEventListener('click', closeSearchDialog);
-searchDialog.addEventListener('click', event => {
-  if (event.target === searchDialog) closeSearchDialog();
-});
 searchDialog.addEventListener('cancel', event => {
   event.preventDefault();
   closeSearchDialog();
@@ -6374,8 +6394,8 @@ function setSplashCursorEnabled(enabled, { notify = false } = {}) {
   }
   const toggle = $('#splashCursorToggle');
   toggle.setAttribute('aria-checked', String(enabled));
-  toggle.setAttribute('aria-label', `${enabled ? '关闭' : '打开'}鼠标流体效果`);
-  if (notify) showToast(`鼠标流体效果已${enabled ? '打开' : '关闭'}`);
+  toggle.setAttribute('aria-label', `${enabled ? '关闭' : '打开'}鼠标效果`);
+  if (notify) showToast(`鼠标效果已${enabled ? '打开' : '关闭'}`);
 }
 
 $('#splashCursorToggle').addEventListener('click', () => {
@@ -6726,10 +6746,6 @@ function navigateUpFromActiveGroup() {
   else closeGroupDialog();
 }
 
-groupDialog.addEventListener('click', event => {
-  if (event.target.closest('.group-sort-item, .dialog-heading, .dialog-actions')) return;
-  navigateUpFromActiveGroup();
-});
 groupDialog.addEventListener('cancel', event => {
   event.preventDefault();
   closeGroupDialog();
@@ -6775,62 +6791,115 @@ $('#ungroupSites').addEventListener('click', () => {
 });
 
 const authDialog = $('#authDialog');
+let avatarRenderVersion = 0;
 
 function userInitials(user) {
   const source = user?.user_metadata?.full_name || user?.name || user?.email || 'MO';
   return source.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase() || 'MO';
 }
 
+function identityAvatarUrl(user) {
+  const candidates = [
+    user?.user_metadata?.avatar_url,
+    user?.user_metadata?.picture,
+    user?.avatar_url,
+    user?.picture
+  ];
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === 'https:') return url.href;
+    } catch {
+      // Ignore missing or malformed provider avatar URLs.
+    }
+  }
+  return '';
+}
+
+async function gravatarAvatarUrl(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail || !globalThis.crypto?.subtle) return '';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalizedEmail));
+  const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `https://gravatar.com/avatar/${hash}?d=404&s=160`;
+}
+
+function resetAvatarImage(image, fallback) {
+  image.removeAttribute('src');
+  image.hidden = true;
+  fallback.hidden = false;
+}
+
+function loadAvatarImage(image, fallback, url, label, version) {
+  if (!url) return;
+  image.onload = () => {
+    if (version !== avatarRenderVersion) return;
+    image.hidden = false;
+    fallback.hidden = true;
+  };
+  image.onerror = () => {
+    if (version !== avatarRenderVersion) return;
+    resetAvatarImage(image, fallback);
+  };
+  image.alt = `${label}的头像`;
+  image.src = url;
+}
+
+async function renderUserAvatar(user, version) {
+  if (!user) return;
+  const avatarUrl = identityAvatarUrl(user) || await gravatarAvatarUrl(user.email).catch(() => '');
+  if (!avatarUrl || version !== avatarRenderVersion || currentUser !== user) return;
+  const label = user.user_metadata?.full_name || user.name || user.email || '用户';
+  loadAvatarImage($('#avatarImage'), $('#avatarText'), avatarUrl, label, version);
+  loadAvatarImage($('#accountMenuAvatarImage'), $('#accountMenuAvatarText'), avatarUrl, label, version);
+  loadAvatarImage($('#authUserAvatarImage'), $('#authUserAvatarText'), avatarUrl, label, version);
+}
+
 function renderAuthState() {
+  const avatarVersion = ++avatarRenderVersion;
   const signedIn = Boolean(currentUser);
   const accountLabel = currentUser?.email || '尚未登录';
   if (signedIn && currentUser.email) store.set('mos-last-login-email', currentUser.email);
   $('#authGuestView').hidden = signedIn;
   $('#authUserView').hidden = !signedIn;
-  $('#authTitle').textContent = signedIn ? '我的账号' : authMode === 'login' ? '邮箱登录' : '创建账号';
+  $('#authTitle').textContent = signedIn ? '我的账号' : '邮箱登录';
   const initials = userInitials(currentUser);
-  $('#avatarText').textContent = signedIn ? initials : 'MO';
+  $('#avatarText').textContent = signedIn ? initials : '';
+  $('#avatarText').hidden = !signedIn;
+  resetAvatarImage($('#avatarImage'), $('#avatarText'));
+  resetAvatarImage($('#accountMenuAvatarImage'), $('#accountMenuAvatarText'));
+  resetAvatarImage($('#authUserAvatarImage'), $('#authUserAvatarText'));
+  $('#avatarText').hidden = !signedIn;
+  $('#avatarGuestIcon').hidden = signedIn;
   $('#accountButton').classList.toggle('is-signed-in', signedIn);
-  $('#accountButton').setAttribute('aria-label', signedIn ? `打开账户菜单：${accountLabel}` : '打开账户菜单');
+  $('#accountButton').setAttribute('aria-label', signedIn ? `打开账户菜单：${accountLabel}` : '打开账户与设置');
   $('#accountButton').title = signedIn ? accountLabel : '账户与设置';
-  $('#accountMenuAvatar').textContent = signedIn ? initials : 'MO';
+  $('#accountMenuAvatarText').textContent = signedIn ? initials : 'MO';
   $('#accountMenuAvatar').classList.toggle('is-signed-in', signedIn);
   $('#accountMenuName').textContent = signedIn ? (currentUser.user_metadata?.full_name || currentUser.name || currentUser.email?.split('@')[0] || '我的账号') : '访客模式';
   $('#accountMenuEmail').textContent = signedIn ? accountLabel : '尚未登录';
   $('#accountMenuLogin').hidden = signedIn;
   $('#accountMenuLogout').hidden = !signedIn;
   if (signedIn) {
-    $('#authUserAvatar').textContent = initials;
+    $('#authUserAvatarText').textContent = initials;
     $('#authUserEmail').textContent = accountLabel;
+    renderUserAvatar(currentUser, avatarVersion);
   }
 }
 
-function renderAuthMode() {
-  const signingUp = authMode === 'signup';
-  $('#authTitle').textContent = signingUp ? '创建账号' : '邮箱登录';
-  $('#authSubmit').textContent = signingUp ? '创建账号' : '登录';
-  $('#authSwitchHint').textContent = signingUp ? '已经有账号？' : '还没有账号？';
-  $('#authSwitchMode').textContent = signingUp ? '返回登录' : '创建账号';
-  $('#savedCredentialLogin').hidden = signingUp;
-  $('#authEmail').autocomplete = signingUp ? 'email' : 'username';
-  $('#authPassword').autocomplete = signingUp ? 'new-password' : 'current-password';
+function resetAuthForm() {
+  $('#authTitle').textContent = '邮箱登录';
+  $('#authIntro').textContent = '已有账号直接登录，首次使用将自动创建账号。';
+  $('#authSubmit').textContent = '继续';
+  $('#authEmail').autocomplete = 'username';
+  $('#authPassword').autocomplete = 'current-password';
   $('#authMessage').textContent = '';
   $('#authMessage').className = 'auth-message';
-}
-
-function maskEmail(email) {
-  const [name, domain] = email.split('@');
-  if (!domain) return email;
-  const visible = name.slice(0, Math.min(2, name.length));
-  return `${visible}${name.length > 2 ? '***' : ''}@${domain}`;
 }
 
 function prefillRememberedEmail() {
   const rememberedEmail = store.get('mos-last-login-email', '');
   if (rememberedEmail && !$('#authEmail').value) $('#authEmail').value = rememberedEmail;
-  $('#savedCredentialText').textContent = rememberedEmail
-    ? `使用 ${maskEmail(rememberedEmail)} 一键登录`
-    : '使用已保存账号一键登录';
 }
 
 async function rememberSuccessfulCredential(email, password) {
@@ -6852,6 +6921,9 @@ function setAuthMessage(message, type = 'error') {
 }
 
 function readableAuthError(error) {
+  const message = String(error?.message || '');
+  if (/email not confirmed/i.test(message)) return '邮箱尚未验证，请先点击确认邮件中的链接。';
+  if (/invalid login credentials|invalid_grant/i.test(message)) return '邮箱或密码不正确。';
   if (error?.status === 404 || error?.message === 'Not Found') return '邮箱登录需部署到 Netlify，并在项目中启用 Identity。';
   if (error instanceof MissingIdentityError) return '邮箱登录需部署到 Netlify，并在项目中启用 Identity。';
   if (error instanceof AuthError) {
@@ -6864,6 +6936,17 @@ function readableAuthError(error) {
   return '暂时无法完成操作，请稍后重试。';
 }
 
+function canCreateAccountAfterLoginError(error) {
+  const message = String(error?.message || '');
+  if (/email not confirmed/i.test(message)) return false;
+  return /invalid login credentials|invalid_grant/i.test(message) || error?.status === 400 || error?.status === 401;
+}
+
+function accountAlreadyExists(error) {
+  const message = String(error?.message || '');
+  return /already (?:been )?registered|email.*(?:already|exists)|user.*(?:already|exists)/i.test(message);
+}
+
 function closeAccountMenu() {
   $('.account-control').classList.remove('is-open');
   $('#accountButton').setAttribute('aria-expanded', 'false');
@@ -6872,7 +6955,7 @@ function closeAccountMenu() {
 function openAuthDialog() {
   renderAuthState();
   if (!currentUser) {
-    renderAuthMode();
+    resetAuthForm();
     prefillRememberedEmail();
   }
   authDialog.showModal();
@@ -6897,9 +6980,25 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeAccountMenu();
 });
 $('#closeAuthDialog').addEventListener('click', () => authDialog.close());
-$('#authSwitchMode').addEventListener('click', () => {
-  authMode = authMode === 'login' ? 'signup' : 'login';
-  renderAuthMode();
+$('#authForgotPassword').addEventListener('click', async () => {
+  const emailInput = $('#authEmail');
+  const email = emailInput.value.trim();
+  if (!email || !emailInput.checkValidity()) {
+    setAuthMessage('请先填写正确的邮箱地址。');
+    emailInput.focus();
+    return;
+  }
+  const button = $('#authForgotPassword');
+  button.disabled = true;
+  setAuthMessage('正在发送重置邮件…', 'success');
+  try {
+    await requestPasswordRecovery(email);
+    setAuthMessage('重置邮件已发送，请检查收件箱和垃圾邮件。', 'success');
+  } catch (error) {
+    setAuthMessage(readableAuthError(error));
+  } finally {
+    button.disabled = false;
+  }
 });
 $('#authForm').addEventListener('submit', async event => {
   event.preventDefault();
@@ -6909,64 +7008,39 @@ $('#authForm').addEventListener('submit', async event => {
   const password = $('#authPassword').value;
   const submit = $('#authSubmit');
   submit.disabled = true;
-  submit.textContent = authMode === 'login' ? '登录中…' : '创建中…';
+  submit.textContent = '处理中…';
   setAuthMessage('');
   try {
-    if (authMode === 'login') {
+    let createdAccount = false;
+    try {
       currentUser = await login(email, password);
-      await rememberSuccessfulCredential(email, password);
-      renderAuthState();
-      await initializeCloudWorkspace({ announce: true });
-      authDialog.close();
-      showToast('登录成功');
-    } else {
-      const user = await signup(email, password, { full_name: email.split('@')[0] });
-      if (user.emailVerified) {
-        currentUser = user;
-        await rememberSuccessfulCredential(email, password);
-        renderAuthState();
-        await initializeCloudWorkspace({ announce: true });
-        authDialog.close();
-        showToast('账号创建成功');
-      } else {
-        setAuthMessage('注册成功，请前往邮箱完成验证。', 'success');
+    } catch (loginError) {
+      if (!canCreateAccountAfterLoginError(loginError)) throw loginError;
+      try {
+        currentUser = await signup(email, password, { full_name: email.split('@')[0] });
+        createdAccount = true;
+      } catch (signupError) {
+        if (accountAlreadyExists(signupError)) throw loginError;
+        throw signupError;
       }
     }
+
+    if (!currentUser.confirmedAt) {
+      currentUser = null;
+      setAuthMessage('账号已创建，请前往邮箱完成验证。', 'success');
+      return;
+    }
+
+    await rememberSuccessfulCredential(email, password);
+    renderAuthState();
+    await initializeCloudWorkspace({ announce: true });
+    authDialog.close();
+    showToast(createdAccount ? '账号创建成功' : '登录成功');
   } catch (error) {
     setAuthMessage(readableAuthError(error));
   } finally {
     submit.disabled = false;
-    submit.textContent = authMode === 'login' ? '登录' : '创建账号';
-  }
-});
-$('#savedCredentialLogin').addEventListener('click', async () => {
-  if (!window.PasswordCredential || !navigator.credentials?.get) {
-    setAuthMessage('当前浏览器不支持一键读取，请点击邮箱输入框使用密码管理器自动填充。');
-    $('#authEmail').focus();
-    return;
-  }
-  const button = $('#savedCredentialLogin');
-  button.disabled = true;
-  setAuthMessage('', '');
-  try {
-    const credential = await navigator.credentials.get({ password: true, mediation: 'required' });
-    if (!credential || credential.type !== 'password') {
-      setAuthMessage('没有选择已保存账号，你仍可使用下方邮箱密码登录。');
-      return;
-    }
-    $('#authEmail').value = credential.id;
-    $('#authPassword').value = credential.password;
-    currentUser = await login(credential.id, credential.password);
-    await rememberSuccessfulCredential(credential.id, credential.password);
-    renderAuthState();
-    await initializeCloudWorkspace({ announce: true });
-    authDialog.close();
-    showToast('登录成功');
-  } catch (error) {
-    if (error?.name === 'NotAllowedError') setAuthMessage('已取消选择账号。');
-    else setAuthMessage(readableAuthError(error));
-  } finally {
-    button.disabled = false;
+    submit.textContent = '继续';
   }
 });
 async function performLogout() {
@@ -6985,6 +7059,20 @@ async function performLogout() {
 
 $('#authLogout').addEventListener('click', performLogout);
 $('#accountMenuLogout').addEventListener('click', performLogout);
+
+const dialogBackdropActions = new Map([
+  [searchDialog, closeSearchDialog],
+  [groupDialog, navigateUpFromActiveGroup]
+]);
+
+$$('dialog').forEach(modal => {
+  modal.addEventListener('click', event => {
+    if (event.target !== modal || !modal.open) return;
+    const backdropAction = dialogBackdropActions.get(modal);
+    if (backdropAction) backdropAction();
+    else modal.close();
+  });
+});
 
 async function initializeAuth() {
   try {
