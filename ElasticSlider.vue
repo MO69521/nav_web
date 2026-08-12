@@ -1,35 +1,66 @@
 <template>
   <div class="elastic-slider" :class="className">
-    <span class="elastic-slider-icon" :style="{ transform: `translateX(${leftOffset}px) scale(${leftScale})` }" aria-hidden="true">
-      <slot name="left-icon"><svg viewBox="0 0 20 20"><rect x="5.5" y="5.5" width="9" height="9" rx="2" /></svg></slot>
-    </span>
     <div
-      ref="sliderRef"
-      class="elastic-slider-control"
-      role="slider"
-      tabindex="0"
-      :aria-label="ariaLabel"
-      :aria-valuemin="startingValue"
-      :aria-valuemax="maxValue"
-      :aria-valuenow="Math.round(value)"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
-      @keydown="onKeydown"
+      class="elastic-slider-row"
+      :style="{ scale, opacity: sliderOpacity }"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
+      @touchstart="handleTouchStart"
+      @touchend="handleTouchEnd"
     >
-      <span class="elastic-slider-track" :style="trackStyle"><i :style="{ width: `${percentage}%` }" /></span>
+      <div class="elastic-slider-icon" :style="{ transform: `translateX(${leftIconTranslateX}px) scale(${leftIconScale})` }">
+        <slot name="left-icon">
+          <component :is="leftIcon" v-if="leftIcon && typeof leftIcon === 'object'" />
+          <span v-else-if="leftIcon">{{ leftIcon }}</span>
+          <span v-else>-</span>
+        </slot>
+      </div>
+
+      <div
+        ref="sliderRef"
+        class="elastic-slider-control"
+        role="slider"
+        tabindex="0"
+        :aria-label="ariaLabel"
+        :aria-valuemin="startingValue"
+        :aria-valuemax="maxValue"
+        :aria-valuenow="Math.round(value)"
+        @pointermove="handlePointerMove"
+        @pointerdown="handlePointerDown"
+        @pointerup="handlePointerUp"
+        @pointercancel="handlePointerUp"
+        @keydown="handleKeydown"
+      >
+        <div
+          class="elastic-slider-stretch"
+          :style="{
+            transform: `scaleX(${sliderScaleX}) scaleY(${sliderScaleY})`,
+            transformOrigin,
+            height: `${sliderHeight}px`,
+            marginTop: `${sliderMarginTop}px`,
+            marginBottom: `${sliderMarginBottom}px`
+          }"
+        >
+          <div class="elastic-slider-track"><div class="elastic-slider-range" :style="{ width: `${rangePercentage}%` }" /></div>
+        </div>
+      </div>
+
+      <div class="elastic-slider-icon" :style="{ transform: `translateX(${rightIconTranslateX}px) scale(${rightIconScale})` }">
+        <slot name="right-icon">
+          <component :is="rightIcon" v-if="rightIcon && typeof rightIcon === 'object'" />
+          <span v-else-if="rightIcon">{{ rightIcon }}</span>
+          <span v-else>+</span>
+        </slot>
+      </div>
     </div>
-    <span class="elastic-slider-icon large" :style="{ transform: `translateX(${rightOffset}px) scale(${rightScale})` }" aria-hidden="true">
-      <slot name="right-icon"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="3" /></svg></slot>
-    </span>
+    <p class="elastic-slider-value">{{ Math.round(value) }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch, type Component } from 'vue';
 
-const MAX_OVERFLOW = 34;
+const MAX_OVERFLOW = 50;
 const props = withDefaults(defineProps<{
   defaultValue?: number;
   startingValue?: number;
@@ -37,99 +68,165 @@ const props = withDefaults(defineProps<{
   className?: string;
   isStepped?: boolean;
   stepSize?: number;
+  leftIcon?: Component | string;
+  rightIcon?: Component | string;
   ariaLabel?: string;
 }>(), {
-  defaultValue: 3,
-  startingValue: 1,
-  maxValue: 5,
+  defaultValue: 50,
+  startingValue: 0,
+  maxValue: 100,
   className: '',
-  isStepped: true,
+  isStepped: false,
   stepSize: 1,
+  leftIcon: '-',
+  rightIcon: '+',
   ariaLabel: '调节图片大小'
 });
 
 const emit = defineEmits<{ change: [value: number] }>();
-const sliderRef = ref<HTMLElement | null>(null);
+const sliderRef = ref<HTMLDivElement | null>(null);
 const value = ref(props.defaultValue);
+const region = ref<'left' | 'middle' | 'right'>('middle');
+const clientX = ref(0);
 const overflow = ref(0);
-const side = ref<'left' | 'middle' | 'right'>('middle');
-const active = ref(false);
-const leftScale = ref(1);
-const rightScale = ref(1);
+const scale = ref(1);
+const leftIconScale = ref(1);
+const rightIconScale = ref(1);
+let scaleAnimation: number | null = null;
+let overflowAnimation: number | null = null;
 
-watch(() => props.defaultValue, next => { value.value = next; });
-
-const percentage = computed(() => ((value.value - props.startingValue) / (props.maxValue - props.startingValue)) * 100);
-const leftOffset = computed(() => side.value === 'left' ? -overflow.value : 0);
-const rightOffset = computed(() => side.value === 'right' ? overflow.value : 0);
-const trackStyle = computed(() => ({
-  transform: `scaleX(${1 + overflow.value / 150}) scaleY(${active.value ? 1.55 : 1})`,
-  transformOrigin: side.value === 'left' ? 'right' : side.value === 'right' ? 'left' : 'center'
-}));
-
-function decay(input: number) {
-  return (2 * (1 / (1 + Math.exp(-(input / MAX_OVERFLOW))) - .5)) * MAX_OVERFLOW;
-}
-
-function setValue(next: number) {
-  const stepped = props.isStepped ? Math.round(next / props.stepSize) * props.stepSize : next;
-  value.value = Math.min(props.maxValue, Math.max(props.startingValue, stepped));
-  emit('change', value.value);
-}
-
-function updateFromPointer(event: PointerEvent) {
-  const element = sliderRef.value;
-  if (!element) return;
-  const rect = element.getBoundingClientRect();
-  setValue(props.startingValue + ((event.clientX - rect.left) / rect.width) * (props.maxValue - props.startingValue));
-  if (event.clientX < rect.left) {
-    side.value = 'left';
-    overflow.value = decay(rect.left - event.clientX);
-    leftScale.value = 1.22;
-  } else if (event.clientX > rect.right) {
-    side.value = 'right';
-    overflow.value = decay(event.clientX - rect.right);
-    rightScale.value = 1.22;
+watch(() => props.defaultValue, newValue => { value.value = newValue; });
+watch(value, next => emit('change', next));
+watch(clientX, latest => {
+  if (!sliderRef.value) return;
+  const { left, right } = sliderRef.value.getBoundingClientRect();
+  if (latest < left) {
+    region.value = 'left';
+    overflow.value = decay(left - latest, MAX_OVERFLOW);
+  } else if (latest > right) {
+    region.value = 'right';
+    overflow.value = decay(latest - right, MAX_OVERFLOW);
   } else {
-    side.value = 'middle';
+    region.value = 'middle';
     overflow.value = 0;
   }
+});
+
+const rangePercentage = computed(() => ((value.value - props.startingValue) / (props.maxValue - props.startingValue)) * 100);
+const sliderScaleX = computed(() => sliderRef.value ? 1 + overflow.value / sliderRef.value.getBoundingClientRect().width : 1);
+const sliderScaleY = computed(() => 1 + (overflow.value / MAX_OVERFLOW) * -.2);
+const transformOrigin = computed(() => {
+  if (!sliderRef.value) return 'center';
+  const { left, width } = sliderRef.value.getBoundingClientRect();
+  return clientX.value < left + width / 2 ? 'right' : 'left';
+});
+const hoverProgress = computed(() => (scale.value - 1) / .2);
+const sliderHeight = computed(() => 6 + hoverProgress.value * 6);
+const sliderMarginTop = computed(() => hoverProgress.value * -3);
+const sliderMarginBottom = computed(() => hoverProgress.value * -3);
+const sliderOpacity = computed(() => .7 + hoverProgress.value * .3);
+const leftIconTranslateX = computed(() => region.value === 'left' ? -overflow.value / scale.value : 0);
+const rightIconTranslateX = computed(() => region.value === 'right' ? overflow.value / scale.value : 0);
+
+function decay(inputValue: number, max: number) {
+  if (!max) return 0;
+  return 2 * (1 / (1 + Math.exp(-(inputValue / max))) - .5) * max;
 }
 
-function onPointerDown(event: PointerEvent) {
-  active.value = true;
-  sliderRef.value?.setPointerCapture(event.pointerId);
-  updateFromPointer(event);
+function animateValue(target: { value: number }, to: number, duration = 300) {
+  const start = target.value;
+  const diff = to - start;
+  const startTime = performance.now();
+  const frame = (now: number) => {
+    const progress = Math.min((now - startTime) / duration, 1);
+    target.value = start + diff * (1 - Math.pow(1 - progress, 3));
+    return progress < 1 ? requestAnimationFrame(frame) : null;
+  };
+  return requestAnimationFrame(frame);
 }
 
-function onPointerMove(event: PointerEvent) {
-  if (active.value) updateFromPointer(event);
+function animateSpring(target: { value: number }, to: number, bounce = .5, duration = 600) {
+  const start = target.value;
+  const startTime = performance.now();
+  const stiffness = 170;
+  const damping = 26 * (1 - bounce);
+  const dampingRatio = damping / (2 * Math.sqrt(stiffness));
+  const angularFreq = Math.sqrt(stiffness);
+  const dampedFreq = angularFreq * Math.sqrt(1 - dampingRatio * dampingRatio);
+  const frame = (now: number) => {
+    const elapsed = now - startTime;
+    const t = elapsed / 1000;
+    const envelope = Math.exp(-dampingRatio * angularFreq * t);
+    const displacement = dampingRatio < 1
+      ? envelope * (Math.cos(dampedFreq * t) + (dampingRatio * angularFreq / dampedFreq) * Math.sin(dampedFreq * t))
+      : Math.exp(-angularFreq * t);
+    target.value = to + (start - to) * displacement;
+    if (Math.abs(target.value - to) >= .01 && elapsed < duration * 3) return requestAnimationFrame(frame);
+    target.value = to;
+    return null;
+  };
+  return requestAnimationFrame(frame);
 }
 
-function onPointerUp() {
-  active.value = false;
-  overflow.value = 0;
-  side.value = 'middle';
-  leftScale.value = 1;
-  rightScale.value = 1;
+function animateIconScale(target: { value: number }) {
+  animateValue(target, 1.4, 125);
+  setTimeout(() => animateValue(target, 1, 125), 125);
 }
 
-function onKeydown(event: KeyboardEvent) {
+watch(region, (next, previous) => {
+  if (next === 'left' && previous !== 'left') animateIconScale(leftIconScale);
+  if (next === 'right' && previous !== 'right') animateIconScale(rightIconScale);
+});
+
+function updateValue(event: PointerEvent) {
+  if (!sliderRef.value) return;
+  const { left, width } = sliderRef.value.getBoundingClientRect();
+  let next = props.startingValue + ((event.clientX - left) / width) * (props.maxValue - props.startingValue);
+  if (props.isStepped) next = Math.round(next / props.stepSize) * props.stepSize;
+  value.value = Math.min(Math.max(next, props.startingValue), props.maxValue);
+  clientX.value = event.clientX;
+}
+
+function handlePointerMove(event: PointerEvent) {
+  if (event.buttons > 0) updateValue(event);
+}
+function handlePointerDown(event: PointerEvent) {
+  updateValue(event);
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+function handlePointerUp() {
+  if (overflowAnimation) cancelAnimationFrame(overflowAnimation);
+  overflowAnimation = animateSpring(overflow, 0, .4, 500);
+}
+function handleMouseEnter() {
+  if (scaleAnimation) cancelAnimationFrame(scaleAnimation);
+  scaleAnimation = animateValue(scale, 1.2, 200);
+}
+function handleMouseLeave() {
+  if (scaleAnimation) cancelAnimationFrame(scaleAnimation);
+  scaleAnimation = animateValue(scale, 1, 200);
+}
+function handleTouchStart() { handleMouseEnter(); }
+function handleTouchEnd() { handleMouseLeave(); }
+function handleKeydown(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
-  setValue(value.value + (event.key === 'ArrowRight' ? props.stepSize : -props.stepSize));
+  const direction = event.key === 'ArrowRight' ? 1 : -1;
+  value.value = Math.min(props.maxValue, Math.max(props.startingValue, value.value + direction * props.stepSize));
 }
+
+onMounted(() => { value.value = props.defaultValue; });
 </script>
 
 <style scoped>
-.elastic-slider { width:190px; height:36px; display:flex; align-items:center; gap:10px; color:var(--muted); user-select:none; }
-.elastic-slider-icon { flex:0 0 20px; width:20px; height:20px; display:grid; place-items:center; transition:transform .2s ease-out,color .2s; }
-.elastic-slider-icon.large { flex-basis:23px; width:23px; height:23px; }
-.elastic-slider-icon svg { width:100%; height:100%; fill:none; stroke:currentColor; stroke-width:1.45; }
-.elastic-slider-control { flex:1; height:34px; display:flex; align-items:center; outline:0; cursor:grab; touch-action:none; }
+.elastic-slider { position:relative; width:12rem; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; color:var(--muted); }
+.elastic-slider-row { width:100%; display:flex; align-items:center; justify-content:center; gap:1rem; touch-action:none; user-select:none; }
+.elastic-slider-icon { flex:0 0 auto; min-width:10px; color:var(--text); font-size:20px; line-height:1; text-align:center; transition:transform .2s ease-out; }
+.elastic-slider-control { position:relative; flex:1; width:100%; max-width:20rem; display:flex; align-items:center; padding:1rem 0; outline:0; cursor:grab; touch-action:none; user-select:none; }
 .elastic-slider-control:active { cursor:grabbing; }
-.elastic-slider-control:focus-visible { border-radius:8px; box-shadow:0 0 0 2px rgba(110,168,254,.28); }
-.elastic-slider-track { width:100%; height:5px; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.15); transition:transform .18s cubic-bezier(.2,.8,.2,1); }
-.elastic-slider-track i { display:block; height:100%; border-radius:inherit; background:var(--accent); box-shadow:0 0 12px rgba(110,168,254,.48); transition:width .12s ease; }
-.elastic-slider:hover { color:var(--text); }
+.elastic-slider-control:focus-visible { border-radius:8px; box-shadow:0 0 0 2px rgba(39,255,100,.28); }
+.elastic-slider-stretch { flex:1; display:flex; }
+.elastic-slider-track { position:relative; flex:1; height:100%; overflow:hidden; border-radius:999px; background:#9ca3af; }
+.elastic-slider-range { position:absolute; height:100%; border-radius:999px; background:#27ff64; }
+.elastic-slider-value { position:absolute; top:-13px; margin:0; color:#9ca3af; font-size:12px; font-weight:500; letter-spacing:.04em; transform:translateY(-.25rem); }
 </style>
