@@ -1,7 +1,7 @@
 import { initAurora } from './aurora.js';
 import { createDragSortEffect } from './drag-sort-effect.js';
 import { createRotatingText } from './rotating-text.js';
-import { createSpecularButton, createSpecularButtonGroup } from './specular-button.js';
+import { createSpecularButtonGroup } from './specular-button.js';
 import { hydrateRollingNavLabels, rollingNavLabel } from './rolling-nav.js';
 import { createPublicShareURL, createShareToken, isSafeNoteImageSource, shouldPreferLocalNote } from './cloud-content.js';
 import {
@@ -570,10 +570,7 @@ function renderGroupedSites(sites) {
   }).join('');
 }
 
-let destroyCategoryAddSpecular = null;
-
 function renderCategoryTabs() {
-  destroyCategoryAddSpecular?.();
   $('#categoryTabs').innerHTML = `${allCategories().map(category => {
     const isCustom = category.custom;
     const isRemovable = category.id !== 'all';
@@ -581,8 +578,7 @@ function renderCategoryTabs() {
       ${rollingNavLabel(category.name)}
       ${isRemovable ? `<span class="tab-remove" data-remove-category="${category.id}" title="删除分类" aria-label="删除 ${escapeHTML(category.name)}">×</span>` : ''}
     </button>`;
-  }).join('')}<button class="category-add" type="button" data-add-category aria-label="新建分类"><span class="category-add-shell"><span class="add-symbol">＋</span><span>新建分类</span></span></button>`;
-  destroyCategoryAddSpecular = createSpecularButton($('.category-add-shell'), { proximity: 250 });
+  }).join('')}<button class="category-add" type="button" data-add-category aria-label="新建分类"><span class="category-add-shell" data-specular-outline><span class="add-symbol">＋</span><span>新建分类</span></span></button>`;
 }
 
 function renderCategoryOptions() {
@@ -602,8 +598,8 @@ function renderSites() {
   const groupedView = !query && currentCategory === 'all';
   const siteMarkup = groupedView ? renderGroupedSites(sites) : sites.map(siteCard).join('');
   const actionButtons = query ? '' : `<div class="bookmark-grid-actions" role="group" aria-label="书签快捷操作">
-    <button class="add-site-card" type="button" data-action="open-add"><span><i class="add-symbol">＋</i></span><strong>新增网址</strong></button>
-    <button class="add-site-card import-bookmarks-card" type="button" data-action="import-bookmarks" aria-label="从 Chrome、Safari、Edge 或 Firefox 导入书签"><span><i class="add-symbol">↓</i></span><strong>导入书签</strong></button>
+    <button class="add-site-card" type="button" data-action="open-add"><span data-specular-outline><i class="add-symbol">＋</i></span><strong>新增网址</strong></button>
+    <button class="add-site-card import-bookmarks-card" type="button" data-action="import-bookmarks" aria-label="从 Chrome、Safari、Edge 或 Firefox 导入书签"><span data-specular-outline><i class="add-symbol">↓</i></span><strong>导入书签</strong></button>
   </div>`;
   $('#siteGrid').innerHTML = `${siteMarkup}${actionButtons}`;
   $('#siteGrid').classList.add('compact-grid');
@@ -7206,7 +7202,6 @@ applyGallerySize();
 loadActiveNote();
 switchWorkspaceView(currentWorkspaceView, { persist: false });
 createSpecularButtonGroup(document, { proximity: 250 });
-createSpecularButton($('#noteSlashMenu'), { proximity: 320 });
 initAurora($('#auroraTop'));
 updateTime();
 setInterval(updateTime, 1000);

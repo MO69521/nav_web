@@ -104,14 +104,46 @@ export function createSpecularButton(element, options = {}) {
   };
 }
 
+function borderColorIsVisible(color = '') {
+  if (!color || color === 'transparent') return false;
+  const alpha = color.match(/^rgba?\([^/)]*(?:\/|,)\s*([\d.]+)\s*\)$/)?.[1];
+  return alpha === undefined || Number(alpha) > 0.06;
+}
+
+export function isOutlinedButton(element) {
+  if (!(element instanceof Element) || element.matches('[data-specular="off"]')) return false;
+  if (!element.matches('button, [role="button"], [data-specular-outline]')) return false;
+  if (element.hasAttribute('hidden') || getComputedStyle(element).display === 'none') return false;
+  if (element.matches('[data-specular-outline]')) return true;
+
+  const style = getComputedStyle(element);
+  const outlinedSides = ['Top', 'Right', 'Bottom', 'Left'].filter(side => {
+    const width = parseFloat(style[`border${side}Width`]) || 0;
+    const borderStyle = style[`border${side}Style`];
+    const color = style[`border${side}Color`];
+    return width >= 1 && borderStyle !== 'none' && borderStyle !== 'hidden' && borderColorIsVisible(color);
+  });
+  const hasRoundedContour = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]
+    .some(radius => (parseFloat(radius) || 0) > 0);
+  return outlinedSides.length === 4 && hasRoundedContour;
+}
+
 export function createSpecularButtonGroup(root = document, options = {}) {
   const cleanups = new Map();
-  const selector = 'button:not(.category-add):not(.add-site-card), [role="button"]:not(.category-add), .add-site-card > span';
-  const textButtonSelector = '.workspace-nav button, .category-tabs .nav-item, .gallery-mode-tabs button, .quick-searches button, .engine-select > button, .auth-switch button, .note-list-item, .note-slash-item';
+  const selector = 'button, [role="button"], [data-specular-outline]';
 
   function connect(element) {
-    if (!(element instanceof Element) || !element.matches(selector) || element.matches(textButtonSelector) || cleanups.has(element)) return;
+    if (!(element instanceof Element) || !element.matches(selector) || cleanups.has(element) || !isOutlinedButton(element)) return;
     cleanups.set(element, createSpecularButton(element, options));
+  }
+
+  function reconcile(element) {
+    if (!(element instanceof Element) || !element.matches(selector)) return;
+    if (isOutlinedButton(element)) connect(element);
+    else if (cleanups.has(element)) {
+      cleanups.get(element)();
+      cleanups.delete(element);
+    }
   }
 
   function scan(node) {
@@ -137,9 +169,10 @@ export function createSpecularButtonGroup(root = document, options = {}) {
     records.forEach(record => {
       record.removedNodes.forEach(disconnect);
       record.addedNodes.forEach(scan);
+      if (record.type === 'attributes') reconcile(record.target);
     });
   });
-  observer.observe(root, { childList: true, subtree: true });
+  observer.observe(root, { attributes: true, attributeFilter: ['class', 'hidden', 'style'], childList: true, subtree: true });
 
   return () => {
     observer.disconnect();
