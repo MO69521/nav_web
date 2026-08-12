@@ -3636,17 +3636,21 @@ function setCloudWorkspaceStatus(state) {
 function renderCloudSyncStatus() {
   const status = $('#noteCloudSyncStatus');
   if (!status) return;
-  const visible = Boolean(currentUser) && !isActiveSharedNote() && cloudWorkspaceStatus !== 'local';
+  const visible = !isActiveSharedNote();
   status.hidden = !visible;
   if (!visible) return;
+  const offline = !currentUser || cloudWorkspaceStatus === 'local';
+  status.classList.toggle('offline', offline);
   status.classList.toggle('syncing', cloudWorkspaceStatus === 'syncing');
   status.classList.toggle('error', cloudWorkspaceStatus === 'error');
   const labels = {
+    local: '未登录 · 仅本机保存',
     syncing: '云端同步中…',
     synced: '云端已同步',
     error: '云端未同步'
   };
-  $('#noteCloudSyncLabel').textContent = labels[cloudWorkspaceStatus] || labels.synced;
+  $('#noteCloudSyncLabel').textContent = offline ? labels.local : (labels[cloudWorkspaceStatus] || labels.synced);
+  status.title = offline ? '点击登录后开启云端同步' : labels[cloudWorkspaceStatus] || labels.synced;
 }
 
 function persistNotes() {
@@ -6997,6 +7001,10 @@ $('#accountButton').addEventListener('click', event => {
 $('#accountMenuLogin').addEventListener('click', () => {
   closeAccountMenu();
   openAuthDialog();
+});
+$('#noteCloudSyncStatus').addEventListener('click', () => {
+  if (currentUser) refreshCloudWorkspace();
+  else openAuthDialog();
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('.account-control')) closeAccountMenu();

@@ -125,10 +125,10 @@
                   <div class="note-title-emoji-menu" id="noteTitleEmojiMenu" role="menu" aria-label="选择标题 Emoji" hidden></div>
                   <div class="note-save-meta">
                     <span class="note-save-status" id="noteSaveStatus" role="status">最近保存：--</span>
-                    <span class="note-cloud-sync-status" id="noteCloudSyncStatus" role="status" aria-live="polite" hidden>
+                    <button class="note-cloud-sync-status offline" id="noteCloudSyncStatus" type="button" aria-live="polite" title="点击登录后开启云端同步">
                       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.1 15.2h8.2a3.25 3.25 0 0 0 .45-6.47A5.15 5.15 0 0 0 5 7.25a4 4 0 0 0 1.1 7.95Z"></path><path class="note-cloud-check" d="m7.6 11.2 1.55 1.55 3.3-3.35"></path></svg>
-                      <span id="noteCloudSyncLabel">云端已同步</span>
-                    </span>
+                      <span id="noteCloudSyncLabel">未登录 · 仅本机保存</span>
+                    </button>
                   </div>
                 </div>
                 <div class="note-document-actions">
