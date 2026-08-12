@@ -1,0 +1,6 @@
+{
+  "read": "doc.enabled == true",
+  "create": "auth != null && auth.loginType != 'ANONYMOUS' && doc.ownerId == auth.uid",
+  "update": "auth != null && ((auth.loginType != 'ANONYMOUS' && get(`database.mos_note_shares.${doc._id}`).ownerId == auth.uid && doc.ownerId == auth.uid) || (auth.loginType == 'ANONYMOUS' && get(`database.mos_note_shares.${doc._id}`).permission == 'edit' && doc.ownerId == get(`database.mos_note_shares.${doc._id}`).ownerId && doc.permission == 'edit' && doc.enabled == true))",
+  "delete": "auth != null && auth.loginType != 'ANONYMOUS' && doc.ownerId == auth.uid"
+}

@@ -337,6 +337,7 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .shared-note-readonly .note-toolbar,.shared-note-readonly .note-selection-bubble,.shared-note-readonly .note-slash-menu,.shared-note-readonly .note-title-emoji-button,.shared-note-readonly .note-heading-tools,.shared-note-readonly .note-block-handle{pointer-events:none!important;opacity:.42}
 .shared-note-readonly #noteEditor{cursor:default}
 .shared-note-active #openNoteShare:disabled,.shared-note-active #deleteNote:disabled{opacity:.36;cursor:not-allowed}
+.shared-note-active .workspace-nav,.shared-note-active .top-actions,.shared-note-active .notes-sidebar,.shared-note-active .note-column-resizer[data-note-resize="sidebar"],.shared-note-active .note-document-actions{display:none}
 .note-outline { position:relative; min-width:0; padding:48px 14px 24px; overflow:hidden; }
 .note-outline-collapse { position:absolute; z-index:3; top:12px; left:14px; width:30px; height:30px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted); font-size:22px; line-height:1; letter-spacing:-.12em; cursor:pointer; transition:color .16s,background .16s,border-color .16s; }
 .note-outline-collapse:hover { color:#fff; border-color:var(--line); background:rgba(255,255,255,.05); }
@@ -345,6 +346,9 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .notes-shell.note-outline-unavailable { grid-template-columns:var(--notes-sidebar-width) 9px minmax(0,1fr); }
 .note-outline-unavailable > .note-outline,
 .note-outline-unavailable > .note-column-resizer[data-note-resize="outline"] { display:none; }
+.shared-note-active .notes-shell { grid-template-columns:var(--note-outline-width) 9px minmax(0,1fr); }
+.shared-note-active .notes-shell.note-outline-collapsed { grid-template-columns:52px 9px minmax(0,1fr); }
+.shared-note-active .notes-shell.note-outline-unavailable { grid-template-columns:minmax(0,1fr); }
 .note-outline-collapsed .note-outline { padding:12px 10px 24px; }
 .note-outline-collapsed .note-outline-collapse { position:relative; top:auto; left:auto; width:32px; height:32px; margin:0 auto; }
 .note-outline-collapsed .note-outline-list { display:none; }
@@ -830,19 +834,21 @@ dialog { width: min(460px, calc(100% - 30px)); padding: 0; color: var(--text); b
 dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(8px); }
 dialog form { padding: 24px; }
 
-.bookmark-import-dialog { width:min(600px,calc(100% - 30px)); max-height:min(820px,calc(100dvh - 30px)); overflow:auto; border:1px solid var(--line); border-radius:22px; background:rgba(17,22,31,.96); box-shadow:0 28px 90px rgba(0,0,0,.46); }
+.bookmark-import-dialog { width:min(600px,calc(100% - 30px)); max-height:min(820px,calc(100dvh - 30px)); overflow:auto; border:0; border-radius:22px; background:rgba(17,22,31,.96); box-shadow:0 28px 90px rgba(0,0,0,.46); }
 .bookmark-import-dialog form { display:grid; gap:18px; padding:30px; }
 .bookmark-import-heading { text-align:center; }
-.bookmark-import-heading h2 { margin:7px 0 9px; font-size:23px; }
+.bookmark-import-heading h2 { margin:0 0 9px; font-size:23px; }
 .bookmark-import-heading p { max-width:420px; margin:0 auto; color:var(--muted); font-size:11px; line-height:1.7; }
 .bookmark-import-browsers { display:flex; flex-wrap:wrap; justify-content:center; gap:7px; }
-.bookmark-import-browsers span { height:28px; display:flex; align-items:center; padding:0 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:9px; }
+.bookmark-import-browsers span { height:32px; display:flex; align-items:center; gap:7px; padding:0 11px 0 9px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:9px; }
+.bookmark-import-browsers img { width:16px; height:16px; display:block; flex:0 0 16px; object-fit:contain; }
 .bookmark-local-scan { min-height:82px; display:grid; grid-template-columns:46px minmax(0,1fr); grid-template-rows:auto auto; align-items:center; column-gap:13px; padding:15px 18px; border:1px solid rgba(110,168,254,.34); border-radius:16px; background:rgba(110,168,254,.085); color:var(--text); text-align:left; cursor:pointer; transition:.2s ease; }
 .bookmark-local-scan > span:not(.specular-button-glow) { grid-row:1/3; width:46px; height:46px; display:grid; place-items:center; border-radius:13px; background:rgba(110,168,254,.15); color:var(--accent); font-size:24px; }
 .bookmark-local-scan strong { align-self:end; font-size:13px; }
 .bookmark-local-scan small { align-self:start; color:var(--muted); font-size:9px; }
 .bookmark-local-scan:hover { border-color:rgba(110,168,254,.68); background:rgba(110,168,254,.13); transform:translateY(-1px); }
 .bookmark-local-scan:disabled { opacity:.58; cursor:wait; transform:none; }
+.bookmark-local-scan[hidden], .bookmark-import-divider[hidden] { display:none; }
 .bookmark-local-results { display:grid; gap:10px; padding:12px; border:1px solid var(--line); border-radius:15px; background:rgba(255,255,255,.018); }
 .bookmark-local-results[hidden] { display:none; }
 .bookmark-local-status { color:var(--muted); font-size:10px; line-height:1.5; }
@@ -866,7 +872,7 @@ dialog form { padding: 24px; }
 .bookmark-import-picker:hover { border-color:rgba(110,168,254,.78); background:rgba(110,168,254,.09); transform:translateY(-1px); }
 .bookmark-import-picker:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .bookmark-import-dialog .dialog-actions { justify-content:center; margin-top:0; }
-.light-theme .bookmark-import-dialog { background:rgba(250,252,255,.98); box-shadow:0 28px 80px rgba(43,49,44,.22); }
+.light-theme .bookmark-import-dialog { background:transparent; box-shadow:none; }
 
 /* 弹窗统一不展示右上角关闭符号 */
 #closeSearch,
@@ -878,15 +884,16 @@ dialog form { padding: 24px; }
 #closeAuthDialog {
   display: none !important;
 }
-#addDialog, #categoryDialog, #galleryAddDialog, #authDialog { inset:0; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; padding:0; border-radius:0; overflow:hidden; }
-#addDialog[open], #categoryDialog[open], #galleryAddDialog[open], #authDialog[open] { display:grid; place-items:center; }
-#addDialog form, #categoryDialog form, #galleryAddDialog form, #authDialog form { position:relative; width:min(920px,calc(100vw - 48px)); height:min(640px,calc(100dvh - 64px)); display:flex; flex-direction:column; justify-content:center; padding:92px 0 88px; padding-inline:clamp(0px,calc((100vw - 488px)/2),240px); }
+#addDialog, #categoryDialog, #galleryAddDialog, #authDialog, #bookmarkImportDialog { inset:0; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; padding:0; border-radius:0; background:transparent; box-shadow:none; overflow:hidden; }
+#addDialog[open], #categoryDialog[open], #galleryAddDialog[open], #authDialog[open], #bookmarkImportDialog[open] { display:grid; place-items:center; }
+#addDialog form, #categoryDialog form, #galleryAddDialog form, #authDialog form, #bookmarkImportDialog form { position:relative; width:min(920px,calc(100vw - 48px)); height:min(640px,calc(100dvh - 64px)); display:flex; flex-direction:column; justify-content:center; padding:92px 0 88px; padding-inline:clamp(0px,calc((100vw - 488px)/2),240px); }
 #addDialog .dialog-heading, #categoryDialog .dialog-heading, #galleryAddDialog .dialog-heading, #authDialog .dialog-heading { position:absolute; top:0; right:0; left:0; align-items:center; justify-content:center; margin:0; }
 #addDialog .dialog-heading > div, #categoryDialog .dialog-heading > div, #galleryAddDialog .dialog-heading > div, #authDialog .dialog-heading > div { width:min(440px,calc(100% - 120px)); min-width:0; text-align:center; }
 #addDialog .dialog-heading > button, #categoryDialog .dialog-heading > button, #galleryAddDialog .dialog-heading > button, #authDialog .dialog-heading > button { position:absolute; top:4px; right:0; width:42px; height:42px; display:grid; place-items:center; border-radius:50%; background:rgba(255,255,255,.045); font-size:24px; }
 #addDialog .dialog-heading > button:hover, #categoryDialog .dialog-heading > button:hover, #galleryAddDialog .dialog-heading > button:hover, #authDialog .dialog-heading > button:hover { color:var(--text); background:rgba(255,255,255,.09); }
 #addDialog .dialog-heading > button:focus-visible, #categoryDialog .dialog-heading > button:focus-visible, #galleryAddDialog .dialog-heading > button:focus-visible, #authDialog .dialog-heading > button:focus-visible { outline:0; color:var(--text); background:rgba(255,255,255,.09); }
-#addDialog .dialog-actions, #categoryDialog .dialog-actions, #galleryAddDialog .dialog-actions, #authDialog .dialog-actions { position:absolute; right:0; bottom:0; left:0; justify-content:center; margin:0; }
+#bookmarkImportDialog .bookmark-import-heading { position:absolute; top:0; right:0; left:0; }
+#addDialog .dialog-actions, #categoryDialog .dialog-actions, #galleryAddDialog .dialog-actions, #authDialog .dialog-actions, #bookmarkImportDialog .dialog-actions { position:absolute; right:0; bottom:0; left:0; justify-content:center; margin:0; }
 .group-dialog { inset:0; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; overflow:hidden; }
 .group-dialog[open] { display:grid; place-items:center; }
 .group-dialog::backdrop { background:rgba(3,5,8,.58); -webkit-backdrop-filter:blur(24px) saturate(115%); backdrop-filter:blur(24px) saturate(115%); }
@@ -923,6 +930,7 @@ dialog form { padding: 24px; }
 .dialog-heading h2 { margin:5px 0 0; font-size:22px; }
 .dialog-heading button { border:0; background:transparent; color:var(--muted); font-size:25px; cursor:pointer; }
 dialog label { display:grid; gap:8px; margin-top:15px; color:var(--muted); font-size:11px; }
+dialog label[hidden] { display:none; }
 dialog input, dialog select { width:100%; height:46px; padding:0 13px; border:1px solid var(--line); border-radius:11px; outline:0; background:rgba(255,255,255,.035); color:var(--text); }
 dialog input:focus, dialog select:focus { border-color:rgba(110,168,254,.45); }
 .group-dialog .dialog-heading { position:absolute; top:0; left:0; right:0; align-items:center; justify-content:center; margin:0; }

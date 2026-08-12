@@ -285,11 +285,15 @@
     <dialog id="bookmarkImportDialog" class="bookmark-import-dialog" aria-labelledby="bookmarkImportTitle">
       <form method="dialog" id="bookmarkImportForm">
         <div class="bookmark-import-heading">
-          <span class="section-kicker">IMPORT BOOKMARKS</span>
           <h2 id="bookmarkImportTitle">导入浏览器书签</h2>
           <p>只读扫描这台 Mac 上的浏览器用户，书签数据不会上传。</p>
         </div>
-        <div class="bookmark-import-browsers" aria-label="支持的浏览器"><span>Chrome</span><span>Safari</span><span>Edge</span><span>Firefox</span></div>
+        <div class="bookmark-import-browsers" aria-label="支持的浏览器">
+          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/chrome/chrome.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Chrome</span>
+          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/safari/safari.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Safari</span>
+          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/edge/edge.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Edge</span>
+          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/firefox/firefox.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Firefox</span>
+        </div>
         <button class="bookmark-local-scan" id="scanLocalBookmarks" type="button"><span>⌕</span><strong>扫描本机浏览器</strong><small>检测用户与书签数量，不会自动导入</small></button>
         <section class="bookmark-local-results" id="bookmarkLocalResults" aria-live="polite" hidden>
           <div class="bookmark-local-status" id="bookmarkLocalStatus"></div>
@@ -354,14 +358,15 @@
 
     <dialog id="authDialog" class="auth-dialog">
       <form id="authForm">
-        <div class="dialog-heading"><div><span class="section-kicker">PERSONAL ACCOUNT</span><h2 id="authTitle">邮箱登录</h2></div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button></div>
+        <div class="dialog-heading"><div><span class="section-kicker">PERSONAL ACCOUNT</span><h2 id="authTitle">邮箱验证码登录</h2></div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button></div>
         <div id="authGuestView">
-          <p class="auth-intro" id="authIntro">已有账号直接登录，首次使用将自动创建账号。</p>
-          <label>邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username" placeholder="you@example.com" /></label>
-          <label>密码<input id="authPassword" name="password" required type="password" minlength="6" autocomplete="current-password" placeholder="至少 6 位密码" /></label>
-          <div class="auth-help"><button type="button" id="authForgotPassword">忘记密码？</button></div>
+          <p class="auth-intro" id="authIntro">输入邮箱获取验证码，新用户会自动创建账号。</p>
+          <label id="authEmailLabel">邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username" placeholder="you@example.com" /></label>
+          <label id="authPasswordLabel" hidden>密码<input id="authPassword" name="password" type="password" minlength="8" autocomplete="current-password" /></label>
+          <label id="authCodeLabel" hidden>邮箱验证码<input id="authCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" minlength="6" maxlength="8" placeholder="输入邮件中的验证码" /></label>
+          <div class="auth-help"><button type="button" id="authForgotPassword" hidden>忘记密码？</button></div>
           <p class="auth-message" id="authMessage" role="status"></p>
-          <button class="auth-submit" id="authSubmit" type="submit">继续</button>
+          <button class="auth-submit" id="authSubmit" type="submit">发送验证码</button>
         </div>
         <div class="auth-user-view" id="authUserView" hidden>
           <span class="auth-user-avatar" id="authUserAvatar"><img class="avatar-image" id="authUserAvatarImage" alt="" hidden /><span id="authUserAvatarText">MO</span></span>

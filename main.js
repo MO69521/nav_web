@@ -3,12 +3,25 @@ import { createDragSortEffect } from './drag-sort-effect.js';
 import { createRotatingText } from './rotating-text.js';
 import { createSpecularButton, createSpecularButtonGroup } from './specular-button.js';
 import { hydrateRollingNavLabels, rollingNavLabel } from './rolling-nav.js';
-import { createShareToken, isSafeNoteImageSource } from './cloud-content.js';
+import { createPublicShareURL, createShareToken, isSafeNoteImageSource } from './cloud-content.js';
+import {
+  CloudBaseConfigError,
+  beginCloudBaseEmailOtp,
+  getCloudBaseUser,
+  isCloudBaseConfigured,
+  logoutCloudBase,
+  onCloudBaseAuthChange,
+  publishCloudShare,
+  readCloudShare,
+  readCloudWorkspace,
+  removeCloudShare,
+  updateCloudShare,
+  writeCloudWorkspace
+} from './cloudbase-client.js';
 import { createApp, h, reactive } from 'vue';
 import SplashCursor from './SplashCursor.vue';
 import CircularGallery from './CircularGallery.vue';
 import LineSidebar from './LineSidebar.vue';
-import { AuthError, MissingIdentityError, getUser, handleAuthCallback, login, logout, onAuthChange, requestPasswordRecovery, signup } from '@netlify/identity';
 
 const baseSites = [
   { id: 'figma', name: 'Figma', url: 'https://www.figma.com', desc: '协作式界面设计工具', category: 'design', color: '#f05b42', icon: 'F' },
@@ -85,16 +98,6 @@ const store = {
     if (cloudWorkspaceKeys.has(key)) scheduleCloudWorkspaceSync();
   }
 };
-
-function authHeaders(headers = {}) {
-  const encodedToken = document.cookie
-    .split('; ')
-    .find(entry => entry.startsWith('nf_jwt='))
-    ?.slice('nf_jwt='.length);
-  return encodedToken
-    ? { ...headers, Authorization: `Bearer ${decodeURIComponent(encodedToken)}` }
-    : headers;
-}
 
 let customSites = store.get('mos-custom-sites', []);
 let customCategories = store.get('mos-custom-categories', []);
@@ -317,32 +320,8 @@ function mergeWorkspaceDocuments(localWorkspace, cloudWorkspace) {
 }
 
 async function putCloudWorkspace(workspace = cloudWorkspaceSnapshot()) {
-  const response = await fetch('/api/workspace', {
-    method: 'PUT',
-    credentials: 'same-origin',
-    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }),
-    body: JSON.stringify({ workspace })
-  });
-  if (!response.ok) throw new Error(response.status === 413 ? '云端工作区容量已满' : '云端保存失败');
-  return response.json();
-}
-
-async function migrateWorkspaceImagesToCloud(workspace) {
-  if (!currentUser) return workspace;
-  const migrated = structuredClone(workspace);
-  for (const item of migrated.galleryItems || []) {
-    if (String(item.image || '').startsWith('data:image/')) item.image = await uploadCloudImage(item.image, `${item.id || 'gallery'}.webp`);
-  }
-  for (const note of migrated.notes || []) {
-    if (!String(note.content || '').includes('data:image/')) continue;
-    const documentFragment = new DOMParser().parseFromString(String(note.content || ''), 'text/html');
-    for (const [index, image] of [...documentFragment.body.querySelectorAll('img')].entries()) {
-      if (!String(image.src || '').startsWith('data:image/')) continue;
-      image.src = await uploadCloudImage(image.src, `${note.id || 'note'}-${index + 1}.webp`);
-    }
-    note.content = documentFragment.body.innerHTML;
-  }
-  return migrated;
+  await writeCloudWorkspace(currentUser, workspace);
+  return { ok: true };
 }
 
 async function syncCloudWorkspace() {
@@ -385,21 +364,19 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
   cloudWorkspaceUserKey = userKey;
   cloudWorkspaceInitPromise = (async () => {
     try {
-      const response = await fetch('/api/workspace', { credentials: 'same-origin', headers: authHeaders({ Accept: 'application/json' }) });
-      if (!response.ok) throw new Error(response.status === 401 ? '登录状态已过期' : '云端工作区读取失败');
-      const payload = await response.json();
-      if (payload.workspace) {
-        const mergedWorkspace = mergeWorkspaceDocuments(cloudWorkspaceSnapshot(), payload.workspace);
+      const cloudWorkspace = await readCloudWorkspace(currentUser);
+      if (cloudWorkspace) {
+        const mergedWorkspace = mergeWorkspaceDocuments(cloudWorkspaceSnapshot(), cloudWorkspace);
         applyCloudWorkspace(mergedWorkspace);
         await putCloudWorkspace(mergedWorkspace);
       }
       else {
-        const migratedWorkspace = await migrateWorkspaceImagesToCloud(cloudWorkspaceSnapshot());
-        applyCloudWorkspace(migratedWorkspace);
-        await putCloudWorkspace(migratedWorkspace);
+        const initialWorkspace = cloudWorkspaceSnapshot();
+        applyCloudWorkspace(initialWorkspace);
+        await putCloudWorkspace(initialWorkspace);
       }
       cloudWorkspaceReady = true;
-      if (announce) showToast(payload.workspace ? '云端工作区已同步' : '本机内容已安全同步到云端');
+      if (announce) showToast(cloudWorkspace ? '云端工作区已同步' : '本机内容已安全同步到云端');
     } catch (error) {
       resetCloudWorkspaceSession();
       showToast(`${error.message || '云端同步失败'}，当前继续使用本机内容`, { duration: 4400 });
@@ -664,9 +641,7 @@ function noteShareToken(note) {
 }
 
 function noteShareURL(note) {
-  const url = new URL(window.location.href);
-  url.hash = `share=${encodeURIComponent(noteShareToken(note))}`;
-  return url.toString();
+  return createPublicShareURL(noteShareToken(note), window.location.href, import.meta.env.VITE_PUBLIC_SITE_URL);
 }
 
 function sharedNotePayload(note) {
@@ -682,29 +657,17 @@ async function publishNoteShare(note) {
   if (!note?.sharing?.enabled) return;
   if (!currentUser) throw new Error('请先登录再开启链接分享');
   const token = noteShareToken(note);
-  const response = await fetch(`/api/shares/${encodeURIComponent(token)}`, {
-    method: 'PUT',
-    credentials: 'same-origin',
-    headers: authHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }),
-    body: JSON.stringify({ note: sharedNotePayload(note), permission: note.sharing.permission })
-  });
-  if (!response.ok) throw new Error(response.status === 413 ? '文档过大，暂时无法分享' : '分享内容发布失败');
+  await publishCloudShare(currentUser, token, sharedNotePayload(note), note.sharing.permission);
 }
 
 async function removeNoteShare(note) {
   if (!note?.sharing?.token || !currentUser) return;
-  const response = await fetch(`/api/shares/${encodeURIComponent(note.sharing.token)}`, { method: 'DELETE', credentials: 'same-origin', headers: authHeaders() });
-  if (!response.ok && response.status !== 404) throw new Error('关闭分享失败');
+  await removeCloudShare(currentUser, note.sharing.token);
 }
 
 async function saveSharedNote() {
   if (!activeSharedNote || activeSharedNote.sharePermission !== 'edit') return;
-  const response = await fetch(`/api/shares/${encodeURIComponent(activeSharedNote.shareToken)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ note: sharedNotePayload(activeSharedNote) })
-  });
-  if (!response.ok) throw new Error(response.status === 403 ? '此分享链接已设为仅查看' : '共享文档保存失败');
+  await updateCloudShare(activeSharedNote.shareToken, sharedNotePayload(activeSharedNote));
 }
 
 async function loadSharedNoteFromLocation() {
@@ -712,9 +675,8 @@ async function loadSharedNoteFromLocation() {
   const token = params.get('share');
   if (!token) return false;
   try {
-    const response = await fetch(`/api/shares/${encodeURIComponent(token)}`, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(response.status === 404 ? '分享链接已失效' : '分享文档读取失败');
-    const payload = await response.json();
+    const payload = await readCloudShare(token);
+    if (!payload) throw new Error('分享链接已失效');
     localNoteIdBeforeShare = notes.some(note => note.id === activeNoteId) ? activeNoteId : notes[0]?.id;
     activeSharedNote = {
       ...sharedNotePayload(payload.note),
@@ -1805,21 +1767,9 @@ function fileToNoteImage(file) {
   });
 }
 
-function dataUrlToBlob(dataUrl) {
-  const [header, encoded] = String(dataUrl).split(',');
-  const type = header.match(/^data:([^;]+)/)?.[1] || 'application/octet-stream';
-  const bytes = Uint8Array.from(atob(encoded || ''), character => character.charCodeAt(0));
-  return new Blob([bytes], { type });
-}
-
 async function uploadCloudImage(source, filename = 'image') {
-  if (!currentUser || !String(source).startsWith('data:image/')) return source;
-  const form = new FormData();
-  form.append('file', dataUrlToBlob(source), filename);
-  const response = await fetch('/api/media', { method: 'POST', credentials: 'same-origin', headers: authHeaders(), body: form });
-  if (!response.ok) throw new Error(response.status === 413 ? '图片过大，请压缩后重试' : '图片上传失败');
-  const payload = await response.json();
-  return payload.url;
+  void filename;
+  return source;
 }
 
 async function insertNoteImageFile(file, placement = null) {
@@ -1831,7 +1781,7 @@ async function insertNoteImageFile(file, placement = null) {
     const source = await uploadCloudImage(dataUrl, file.name || 'note-image');
     const alt = (file.name || '文档图片').replace(/\.[^.]+$/, '');
     insertNoteImageSource(source, alt, placement);
-    showToast(currentUser ? '图片已上传并插入' : '图片已插入（登录后可云端保存）');
+    showToast(currentUser ? '图片已插入并将随工作区保存' : '图片已插入（登录后可云端保存）');
   } catch (error) {
     showToast(error.message || '图片插入失败');
   } finally {
@@ -6792,6 +6742,8 @@ $('#ungroupSites').addEventListener('click', () => {
 
 const authDialog = $('#authDialog');
 let avatarRenderVersion = 0;
+let authFlow = 'email';
+let pendingEmailVerification = null;
 
 function userInitials(user) {
   const source = user?.user_metadata?.full_name || user?.name || user?.email || 'MO';
@@ -6888,11 +6840,21 @@ function renderAuthState() {
 }
 
 function resetAuthForm() {
-  $('#authTitle').textContent = '邮箱登录';
-  $('#authIntro').textContent = '已有账号直接登录，首次使用将自动创建账号。';
-  $('#authSubmit').textContent = '继续';
+  authFlow = 'email';
+  pendingEmailVerification = null;
+  $('#authTitle').textContent = '邮箱验证码登录';
+  $('#authIntro').textContent = '输入邮箱获取验证码，新用户会自动创建账号。';
+  $('#authSubmit').textContent = '发送验证码';
+  $('#authEmailLabel').hidden = false;
+  $('#authPasswordLabel').hidden = true;
+  $('#authPassword').disabled = true;
+  $('#authPassword').required = false;
+  $('#authCodeLabel').hidden = true;
+  $('#authCode').required = false;
+  $('#authCode').value = '';
+  $('#authEmail').disabled = false;
+  $('#authForgotPassword').hidden = true;
   $('#authEmail').autocomplete = 'username';
-  $('#authPassword').autocomplete = 'current-password';
   $('#authMessage').textContent = '';
   $('#authMessage').className = 'auth-message';
 }
@@ -6902,16 +6864,9 @@ function prefillRememberedEmail() {
   if (rememberedEmail && !$('#authEmail').value) $('#authEmail').value = rememberedEmail;
 }
 
-async function rememberSuccessfulCredential(email, password) {
+function rememberSuccessfulEmail(email) {
   store.set('mos-last-login-email', email);
   prefillRememberedEmail();
-  if (!window.PasswordCredential || !navigator.credentials?.store) return;
-  try {
-    const credential = new PasswordCredential({ id: email, password, name: email });
-    await navigator.credentials.store(credential);
-  } catch {
-    // The browser may decline or not support storing password credentials.
-  }
 }
 
 function setAuthMessage(message, type = 'error') {
@@ -6922,29 +6877,12 @@ function setAuthMessage(message, type = 'error') {
 
 function readableAuthError(error) {
   const message = String(error?.message || '');
-  if (/email not confirmed/i.test(message)) return '邮箱尚未验证，请先点击确认邮件中的链接。';
-  if (/invalid login credentials|invalid_grant/i.test(message)) return '邮箱或密码不正确。';
-  if (error?.status === 404 || error?.message === 'Not Found') return '邮箱登录需部署到 Netlify，并在项目中启用 Identity。';
-  if (error instanceof MissingIdentityError) return '邮箱登录需部署到 Netlify，并在项目中启用 Identity。';
-  if (error instanceof AuthError) {
-    if (error.status === 401) return '邮箱或密码不正确。';
-    if (error.status === 403) return '当前项目暂未开放邮箱注册。';
-    if (error.status === 404) return '邮箱登录需部署到 Netlify，并在项目中启用 Identity。';
-    if (error.status === 422) return '请检查邮箱格式，密码至少需要 6 位。';
-    return error.message;
-  }
-  return '暂时无法完成操作，请稍后重试。';
-}
-
-function canCreateAccountAfterLoginError(error) {
-  const message = String(error?.message || '');
-  if (/email not confirmed/i.test(message)) return false;
-  return /invalid login credentials|invalid_grant/i.test(message) || error?.status === 400 || error?.status === 401;
-}
-
-function accountAlreadyExists(error) {
-  const message = String(error?.message || '');
-  return /already (?:been )?registered|email.*(?:already|exists)|user.*(?:already|exists)/i.test(message);
+  if (error instanceof CloudBaseConfigError) return '请先在 .env.local 中配置 CloudBase 环境 ID 和 Publishable Key。';
+  if (/not.?found|user.*exist|failed_precondition/i.test(`${error?.code || ''} ${message}`)) return '该邮箱尚未注册。';
+  if (/invalid.*password|invalid.*credential|password.*incorrect|unauthorized/i.test(`${error?.code || ''} ${message}`)) return '邮箱或密码不正确。';
+  if (/captcha|verification|otp|nonce/i.test(`${error?.code || ''} ${message}`)) return '验证码无效或已过期，请重新获取。';
+  if (/permission|domain|source/i.test(`${error?.code || ''} ${message}`)) return '当前域名尚未加入 CloudBase 安全来源。';
+  return message || '暂时无法完成操作，请稍后重试。';
 }
 
 function closeAccountMenu() {
@@ -6980,72 +6918,53 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeAccountMenu();
 });
 $('#closeAuthDialog').addEventListener('click', () => authDialog.close());
-$('#authForgotPassword').addEventListener('click', async () => {
-  const emailInput = $('#authEmail');
-  const email = emailInput.value.trim();
-  if (!email || !emailInput.checkValidity()) {
-    setAuthMessage('请先填写正确的邮箱地址。');
-    emailInput.focus();
-    return;
-  }
-  const button = $('#authForgotPassword');
-  button.disabled = true;
-  setAuthMessage('正在发送重置邮件…', 'success');
-  try {
-    await requestPasswordRecovery(email);
-    setAuthMessage('重置邮件已发送，请检查收件箱和垃圾邮件。', 'success');
-  } catch (error) {
-    setAuthMessage(readableAuthError(error));
-  } finally {
-    button.disabled = false;
-  }
-});
 $('#authForm').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
   if (!form.reportValidity()) return;
   const email = $('#authEmail').value.trim();
-  const password = $('#authPassword').value;
   const submit = $('#authSubmit');
   submit.disabled = true;
   submit.textContent = '处理中…';
   setAuthMessage('');
   try {
-    let createdAccount = false;
-    try {
-      currentUser = await login(email, password);
-    } catch (loginError) {
-      if (!canCreateAccountAfterLoginError(loginError)) throw loginError;
-      try {
-        currentUser = await signup(email, password, { full_name: email.split('@')[0] });
-        createdAccount = true;
-      } catch (signupError) {
-        if (accountAlreadyExists(signupError)) throw loginError;
-        throw signupError;
-      }
-    }
-
-    if (!currentUser.confirmedAt) {
-      currentUser = null;
-      setAuthMessage('账号已创建，请前往邮箱完成验证。', 'success');
+    if (authFlow === 'email-code') {
+      currentUser = await pendingEmailVerification($('#authCode').value.trim());
+    } else {
+      pendingEmailVerification = await beginCloudBaseEmailOtp(email);
+      authFlow = 'email-code';
+      $('#authTitle').textContent = '输入验证码';
+      $('#authIntro').textContent = `验证码已发送到 ${email}，验证后将自动登录。`;
+      $('#authEmail').disabled = true;
+      $('#authCodeLabel').hidden = false;
+      $('#authCode').required = true;
+      $('#authSubmit').textContent = '验证并登录';
+      setAuthMessage('验证码已发送，请检查收件箱和垃圾邮件。', 'success');
+      $('#authCode').focus();
       return;
     }
 
-    await rememberSuccessfulCredential(email, password);
+    if (!currentUser) {
+      setAuthMessage('未能获取用户信息，请重试。');
+      return;
+    }
+
+    rememberSuccessfulEmail(email);
     renderAuthState();
     await initializeCloudWorkspace({ announce: true });
     authDialog.close();
-    showToast(createdAccount ? '账号创建成功' : '登录成功');
+    resetAuthForm();
+    showToast('登录成功');
   } catch (error) {
     setAuthMessage(readableAuthError(error));
   } finally {
     submit.disabled = false;
-    submit.textContent = '继续';
+    submit.textContent = authFlow === 'email-code' ? '验证并登录' : '发送验证码';
   }
 });
 async function performLogout() {
   try {
-    await logout();
+    await logoutCloudBase();
     currentUser = null;
     resetCloudWorkspaceSession();
     renderAuthState();
@@ -7075,26 +6994,30 @@ $$('dialog').forEach(modal => {
 });
 
 async function initializeAuth() {
+  const shareToken = new URLSearchParams(location.hash.replace(/^#/, '')).get('share');
+  if (shareToken) {
+    renderAuthState();
+    await loadSharedNoteFromLocation();
+    return;
+  }
+  if (!isCloudBaseConfigured()) {
+    renderAuthState();
+    showToast('CloudBase 尚未配置，当前使用本机模式', { duration: 4400 });
+    return;
+  }
   try {
-    const callback = await handleAuthCallback();
-    if (callback?.user) {
-      currentUser = callback.user;
-      showToast(callback.type === 'confirmation' ? '邮箱验证成功' : '登录成功');
-    } else if (!currentUser) {
-      currentUser = await getUser();
-    }
+    currentUser = await getCloudBaseUser();
   } catch (error) {
-    if (!(error instanceof MissingIdentityError)) showToast(readableAuthError(error));
+    showToast(readableAuthError(error));
   }
   renderAuthState();
   await initializeCloudWorkspace();
-  onAuthChange(async (_event, user) => {
+  onCloudBaseAuthChange(async user => {
     currentUser = user;
     renderAuthState();
     if (user) await initializeCloudWorkspace();
     else resetCloudWorkspaceSession();
   });
-  await loadSharedNoteFromLocation();
 }
 
 applyTheme(store.get('mos-light-theme', false) ? 'light' : 'dark');
