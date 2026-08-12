@@ -384,8 +384,8 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .note-outline-item.active { color:var(--accent); background:rgba(110,168,254,.08); }
 .note-outline-empty { margin:0; padding:8px; color:var(--muted-2); font-size:11px; line-height:1.75; }
 .note-document { --note-document-top-padding:34px; min-width:0; height:100%; padding:var(--note-document-top-padding) clamp(28px,5vw,82px) 70px; overflow:auto; }
-.note-document-header { width:100%; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:34px auto; align-items:center; gap:18px; margin:0; }
-.note-document-title { position:relative; grid-row:2; min-width:0; width:100%; display:grid; align-content:center; gap:14px; }
+.note-document-header { width:100%; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto; align-items:center; gap:0; margin:0; }
+.note-document-title { position:relative; grid-row:1; min-width:0; width:100%; display:grid; align-content:center; gap:14px; }
 .note-document-title-row { position:relative; min-width:0; display:flex; align-items:center; }
 .note-document-title-row::before { content:''; position:absolute; z-index:1; top:-42px; left:-6px; width:48px; height:42px; }
 .note-title-input { flex:1; width:100%; min-width:0; height:42px; padding:0; border:0; outline:0; background:transparent; color:var(--text); font-size:31px; font-weight:700; letter-spacing:-.045em; }
