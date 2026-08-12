@@ -136,7 +136,7 @@ let circularGallerySignature = galleryItems.map(item => `${item.id}:${item.image
 let currentGalleryMode = 'pins';
 let currentGalleryBoard = '全部';
 let activeGalleryItemId = null;
-let gallerySize = Math.min(5, Math.max(1, Number(store.get('mos-gallery-size', 3)) || 3));
+let gallerySize = Math.min(6, Math.max(1, Number(store.get('mos-gallery-size', 3)) || 3));
 const initialNoteTime = Date.now();
 const defaultNotes = [{
   id: 'note-welcome',
@@ -623,7 +623,7 @@ function galleryBoards() {
 }
 
 function galleryColumnsForSize(size = gallerySize) {
-  const desktopColumns = [10, 8, 7, 5, 4][Math.max(1, Math.min(5, size)) - 1];
+  const desktopColumns = [10, 8, 7, 5, 4, 3][Math.max(1, Math.min(6, size)) - 1];
   const viewportLimit = window.innerWidth <= 480 ? 2
     : window.innerWidth <= 900 ? 3
       : window.innerWidth <= 1100 ? 4
@@ -634,7 +634,7 @@ function galleryColumnsForSize(size = gallerySize) {
 }
 
 function applyGallerySize(size = gallerySize, { persist = false } = {}) {
-  gallerySize = Math.max(1, Math.min(5, Math.round(size)));
+  gallerySize = Math.max(1, Math.min(6, Math.round(size)));
   $('#galleryGrid')?.style.setProperty('--gallery-columns', galleryColumnsForSize(gallerySize));
   if (persist) store.set('mos-gallery-size', gallerySize);
   requestAnimationFrame(() => requestAnimationFrame(layoutGalleryMasonry));
@@ -7185,7 +7185,7 @@ createApp({
     return () => h(ElasticSlider, {
       defaultValue: gallerySize,
       startingValue: 1,
-      maxValue: 5,
+      maxValue: 6,
       isStepped: true,
       stepSize: 1,
       ariaLabel: '调节图库图片大小',

@@ -56,7 +56,6 @@
         </slot>
       </div>
     </div>
-    <p class="elastic-slider-value">{{ Math.round(value) }}</p>
   </div>
 </template>
 
@@ -232,5 +231,4 @@ onMounted(() => { value.value = props.defaultValue; });
 .elastic-slider-track { position:relative; flex:1; height:100%; border-radius:999px; background:#9ca3af; }
 .elastic-slider-range { position:absolute; inset:0 auto 0 0; overflow:hidden; border-radius:999px; background:var(--accent); box-shadow:0 0 12px rgba(110,168,254,.38); }
 .elastic-slider-thumb { position:absolute; z-index:2; top:50%; width:15px; height:15px; border:3px solid var(--accent); border-radius:50%; background:#f5f8ff; box-shadow:0 2px 8px rgba(0,0,0,.32),0 0 0 3px rgba(110,168,254,.14); transform:translate(-50%,-50%); pointer-events:none; }
-.elastic-slider-value { position:absolute; top:-13px; margin:0; color:#9ca3af; font-size:12px; font-weight:500; letter-spacing:.04em; transform:translateY(-.25rem); }
 </style>
