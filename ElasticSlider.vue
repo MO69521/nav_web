@@ -41,7 +41,10 @@
             marginBottom: `${sliderMarginBottom}px`
           }"
         >
-          <div class="elastic-slider-track"><div class="elastic-slider-range" :style="{ width: `${rangePercentage}%` }" /></div>
+          <div class="elastic-slider-track">
+            <div class="elastic-slider-range" :style="{ width: `${rangePercentage}%` }" />
+            <i class="elastic-slider-thumb" :style="{ left: `${rangePercentage}%` }" />
+          </div>
         </div>
       </div>
 
@@ -224,9 +227,10 @@ onMounted(() => { value.value = props.defaultValue; });
 .elastic-slider-icon { flex:0 0 auto; min-width:10px; color:var(--text); font-size:20px; line-height:1; text-align:center; transition:transform .2s ease-out; }
 .elastic-slider-control { position:relative; flex:1; width:100%; max-width:20rem; display:flex; align-items:center; padding:1rem 0; outline:0; cursor:grab; touch-action:none; user-select:none; }
 .elastic-slider-control:active { cursor:grabbing; }
-.elastic-slider-control:focus-visible { border-radius:8px; box-shadow:0 0 0 2px rgba(39,255,100,.28); }
+.elastic-slider-control:focus-visible { border-radius:8px; box-shadow:0 0 0 2px rgba(110,168,254,.28); }
 .elastic-slider-stretch { flex:1; display:flex; }
-.elastic-slider-track { position:relative; flex:1; height:100%; overflow:hidden; border-radius:999px; background:#9ca3af; }
-.elastic-slider-range { position:absolute; height:100%; border-radius:999px; background:#27ff64; }
+.elastic-slider-track { position:relative; flex:1; height:100%; border-radius:999px; background:#9ca3af; }
+.elastic-slider-range { position:absolute; inset:0 auto 0 0; overflow:hidden; border-radius:999px; background:var(--accent); box-shadow:0 0 12px rgba(110,168,254,.38); }
+.elastic-slider-thumb { position:absolute; z-index:2; top:50%; width:15px; height:15px; border:3px solid var(--accent); border-radius:50%; background:#f5f8ff; box-shadow:0 2px 8px rgba(0,0,0,.32),0 0 0 3px rgba(110,168,254,.14); transform:translate(-50%,-50%); pointer-events:none; }
 .elastic-slider-value { position:absolute; top:-13px; margin:0; color:#9ca3af; font-size:12px; font-weight:500; letter-spacing:.04em; transform:translateY(-.25rem); }
 </style>
