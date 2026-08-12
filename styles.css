@@ -155,19 +155,23 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .clock-card b::before { content:''; width:4px; height:4px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; }
 
 .search-section { width: 100%; margin: 0 0 50px; }
-.search-dialog { width:min(1040px,calc(100% - 40px)); max-width:none; overflow:visible; border:0; background:transparent; box-shadow:none; }
-.search-dialog::backdrop { background:rgba(2,7,16,.74); backdrop-filter:blur(12px); }
-.search-dialog[open] { animation:search-dialog-in .3s cubic-bezier(.2,.82,.24,1) both; }
-.search-dialog[open]::backdrop { animation:search-backdrop-in .26s ease-out both; }
-.search-dialog.is-closing { animation:search-dialog-out .2s ease-in both; }
-.search-dialog.is-closing::backdrop { animation:search-backdrop-out .2s ease-in both; }
-@keyframes search-dialog-in { from { opacity:0; transform:translateY(22px) scale(.94); filter:blur(5px); } to { opacity:1; transform:translateY(0) scale(1); filter:blur(0); } }
-@keyframes search-dialog-out { from { opacity:1; transform:translateY(0) scale(1); filter:blur(0); } to { opacity:0; transform:translateY(12px) scale(.97); filter:blur(3px); } }
-@keyframes search-backdrop-in { from { opacity:0; } to { opacity:1; } }
-@keyframes search-backdrop-out { from { opacity:1; } to { opacity:0; } }
-.search-dialog-content { position:relative; padding:48px 6px 12px; }
+.search-dialog { position:fixed; z-index:70; inset:18px clamp(77px,calc(4vw + 49px),129px) auto auto; width:min(620px,calc(100vw - 180px)); max-width:none; margin:0; padding:0; overflow:visible; border:0; background:transparent; box-shadow:none; transform-origin:top right; }
+.search-dialog::backdrop { display:none; }
+.search-dialog[open] { animation:search-expand-in .22s cubic-bezier(.2,.82,.24,1) both; }
+.search-dialog.is-closing { animation:search-expand-out .16s ease-in both; }
+@keyframes search-expand-in { from { opacity:0; transform:scaleX(.22); } to { opacity:1; transform:scaleX(1); } }
+@keyframes search-expand-out { from { opacity:1; transform:scaleX(1); } to { opacity:0; transform:scaleX(.35); } }
+.search-dialog-content { position:relative; padding:0; }
 .search-dialog .search-section { margin:0; }
-.search-dialog .search-box { padding:0 11px; background:rgba(18,22,31,.96); box-shadow:0 28px 90px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.025); }
+.search-dialog .search-box { height:46px; padding:0 6px; border-radius:14px; background:rgba(18,22,31,.94); box-shadow:0 16px 42px rgba(0,0,0,.34),0 0 0 1px rgba(255,255,255,.025); }
+.search-dialog #engineIcon { width:28px; height:28px; }
+.search-dialog .engine-select > button { padding:0 8px; }
+.search-dialog .engine-menu { top:52px; }
+.search-dialog .search-box input { font-size:13px; }
+.search-dialog .search-submit { flex-basis:34px; width:34px; height:34px; margin-left:7px; }
+.search-dialog .search-submit svg { width:16px; height:16px; }
+.search-dialog .quick-searches { width:max-content; max-width:100%; margin:7px 0 0 auto; padding:8px 10px; flex-wrap:wrap; justify-content:flex-start; border:1px solid var(--line); border-radius:11px; background:rgba(18,22,31,.94); box-shadow:0 14px 34px rgba(0,0,0,.28); backdrop-filter:blur(18px); }
+.search-expanded #openSearch { opacity:0; pointer-events:none; }
 .search-dialog-close { position:absolute; top:0; right:8px; width:34px; height:34px; display:grid; place-items:center; border:1px solid var(--line); border-radius:10px; background:rgba(18,22,31,.9); color:var(--muted); font-size:21px; cursor:pointer; transition:.18s; }
 .search-dialog-close:hover { color:var(--text); border-color:rgba(110,168,254,.35); }
 .search-box { height: 70px; display: flex; align-items: center; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(20px); transition: .2s; }
@@ -1026,6 +1030,7 @@ dialog input:focus, dialog select:focus { border-color:rgba(110,168,254,.45); }
 .light-theme .engine-menu { background:#fff; }
 .light-theme .search-dialog::backdrop { background:rgba(220,226,232,.68); }
 .light-theme .search-dialog .search-box { background:rgba(255,255,255,.97); box-shadow:0 28px 90px rgba(43,49,44,.22),0 0 0 1px rgba(20,25,30,.035); }
+.light-theme .search-dialog .quick-searches { background:rgba(255,255,255,.97); box-shadow:0 14px 34px rgba(43,49,44,.16); }
 .light-theme .search-dialog-close { background:rgba(255,255,255,.94); }
 .light-theme .category-tabs { background: transparent; box-shadow: none; }
 .light-theme .category-tabs .nav-item { color: #747b84; }
@@ -1065,6 +1070,7 @@ dialog input:focus, dialog select:focus { border-color:rgba(110,168,254,.45); }
   .topbar-left { gap:20px; }
   .topbar .brand-logo { height:16px; }
   .top-actions { gap: 7px; }
+  .search-dialog { inset:12px 64px auto auto; width:calc(100vw - 84px); }
   .workspace-nav { margin-right:1px; }
   .workspace-nav button, .category-tabs .nav-item, .category-tabs .nav-item.active { font-size:11px; }
   .category-tabs { width: 100%; justify-content: flex-start; margin-bottom: 34px; border-left: 0; border-right: 0; border-radius: 0; padding-inline: 0; background: transparent; }

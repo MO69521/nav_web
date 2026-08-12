@@ -6323,7 +6323,8 @@ let searchCloseTimer = null;
 function openSearchDialog() {
   clearTimeout(searchCloseTimer);
   searchDialog.classList.remove('is-closing');
-  if (!searchDialog.open) searchDialog.showModal();
+  if (!searchDialog.open) searchDialog.show();
+  document.body.classList.add('search-expanded');
   requestAnimationFrame(() => {
     $('#searchInput').focus();
     $('#searchInput').select();
@@ -6337,6 +6338,7 @@ function closeSearchDialog() {
   searchCloseTimer = setTimeout(() => {
     searchDialog.close();
     searchDialog.classList.remove('is-closing');
+    document.body.classList.remove('search-expanded');
   }, duration);
 }
 
@@ -6347,6 +6349,10 @@ searchDialog.addEventListener('cancel', event => {
   closeSearchDialog();
 });
 searchDialog.addEventListener('close', () => { $('#engineMenu').hidden = true; });
+document.addEventListener('pointerdown', event => {
+  if (!searchDialog.open || event.target.closest('#searchDialog') || event.target.closest('#openSearch')) return;
+  closeSearchDialog();
+});
 
 $('#searchForm').addEventListener('submit', event => { event.preventDefault(); doSearch($('#searchInput').value); });
 $('#searchInput').addEventListener('input', event => {
