@@ -90,6 +90,7 @@ let cloudWorkspaceSyncTimer = null;
 let cloudWorkspaceUserKey = '';
 let cloudWorkspaceErrorShown = false;
 let cloudWorkspaceInitPromise = null;
+let cloudWorkspaceStatus = 'local';
 
 const store = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
@@ -328,10 +329,13 @@ async function putCloudWorkspace(workspace = cloudWorkspaceSnapshot()) {
 
 async function syncCloudWorkspace() {
   if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser) return;
+  setCloudWorkspaceStatus('syncing');
   try {
     await putCloudWorkspace();
     cloudWorkspaceErrorShown = false;
+    setCloudWorkspaceStatus('synced');
   } catch (error) {
+    setCloudWorkspaceStatus('error');
     if (!cloudWorkspaceErrorShown) {
       cloudWorkspaceErrorShown = true;
       showToast(`${error.message || '云端保存失败'}，内容仍保存在本机`, { duration: 4200 });
@@ -342,6 +346,7 @@ async function syncCloudWorkspace() {
 function scheduleCloudWorkspaceSync() {
   if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser) return;
   clearTimeout(cloudWorkspaceSyncTimer);
+  setCloudWorkspaceStatus('syncing');
   cloudWorkspaceSyncTimer = setTimeout(syncCloudWorkspace, 900);
 }
 
@@ -352,6 +357,7 @@ function resetCloudWorkspaceSession() {
   cloudWorkspaceUserKey = '';
   cloudWorkspaceErrorShown = false;
   cloudWorkspaceInitPromise = null;
+  setCloudWorkspaceStatus('local');
 }
 
 async function initializeCloudWorkspace({ announce = false } = {}) {
@@ -364,6 +370,7 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
   if (cloudWorkspaceInitPromise && cloudWorkspaceUserKey === userKey) return cloudWorkspaceInitPromise;
   cloudWorkspaceReady = false;
   cloudWorkspaceUserKey = userKey;
+  setCloudWorkspaceStatus('syncing');
   cloudWorkspaceInitPromise = (async () => {
     try {
       const cloudWorkspace = await readCloudWorkspace(currentUser);
@@ -378,9 +385,11 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
         await putCloudWorkspace(initialWorkspace);
       }
       cloudWorkspaceReady = true;
+      setCloudWorkspaceStatus('synced');
       if (announce) showToast(cloudWorkspace ? '云端工作区已同步' : '本机内容已安全同步到云端');
     } catch (error) {
       resetCloudWorkspaceSession();
+      setCloudWorkspaceStatus('error');
       showToast(`${error.message || '云端同步失败'}，当前继续使用本机内容`, { duration: 4400 });
     } finally {
       cloudWorkspaceInitPromise = null;
@@ -3570,6 +3579,27 @@ function renderNoteSaveStatus(state = 'saved', note = noteById()) {
   else status.textContent = `最近保存：${lastSaved}`;
 }
 
+function setCloudWorkspaceStatus(state) {
+  cloudWorkspaceStatus = state;
+  renderCloudSyncStatus();
+}
+
+function renderCloudSyncStatus() {
+  const status = $('#noteCloudSyncStatus');
+  if (!status) return;
+  const visible = Boolean(currentUser) && !isActiveSharedNote() && cloudWorkspaceStatus !== 'local';
+  status.hidden = !visible;
+  if (!visible) return;
+  status.classList.toggle('syncing', cloudWorkspaceStatus === 'syncing');
+  status.classList.toggle('error', cloudWorkspaceStatus === 'error');
+  const labels = {
+    syncing: '云端同步中…',
+    synced: '云端已同步',
+    error: '云端未同步'
+  };
+  $('#noteCloudSyncLabel').textContent = labels[cloudWorkspaceStatus] || labels.synced;
+}
+
 function persistNotes() {
   try {
     store.set('mos-notes', notes);
@@ -3929,6 +3959,7 @@ function loadActiveNote({ focusTitle = false } = {}) {
   renderNoteOutline();
   if (noteOutlineState.items.length) noteOutlineState.activeIndex = 0;
   renderNoteSaveStatus('saved', note);
+  renderCloudSyncStatus();
   renderNoteList();
   if (!$('#noteSharePanel').hidden) renderNoteSharePanel();
   if (focusTitle) {

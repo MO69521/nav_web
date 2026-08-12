@@ -392,9 +392,20 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .note-title-emoji-menu button.clear { grid-column:1/-1; height:30px; color:var(--muted); font-size:10px; transform:none; }
 .light-theme .note-title-emoji-menu { border-color:rgba(31,42,56,.14); background:rgba(248,251,255,.76); box-shadow:0 20px 52px rgba(31,42,56,.16); }
 .note-document-actions { position:fixed; z-index:44; top:102px; right:clamp(28px,4vw,80px); width:auto; display:flex; align-items:center; justify-content:flex-end; gap:12px; }
-.note-save-status { min-height:22px; color:var(--muted-2); font-size:14px; line-height:1.6; text-align:left; font-variant-numeric:tabular-nums; letter-spacing:.015em; }
+.note-save-meta { min-height:22px; display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.note-save-status { color:var(--muted-2); font-size:14px; line-height:1.6; text-align:left; font-variant-numeric:tabular-nums; letter-spacing:.015em; }
 .note-save-status.saving { color:var(--accent); }
 .note-save-status.error { color:#ff8b94; }
+.note-cloud-sync-status { display:inline-flex; align-items:center; gap:5px; color:#58d68d; font-size:12px; font-weight:650; line-height:1.4; letter-spacing:.01em; }
+.note-cloud-sync-status[hidden] { display:none; }
+.note-cloud-sync-status::before { content:''; width:4px; height:4px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; }
+.note-cloud-sync-status svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.45; stroke-linecap:round; stroke-linejoin:round; }
+.note-cloud-sync-status.syncing { color:var(--accent); font-weight:550; }
+.note-cloud-sync-status.syncing .note-cloud-check { display:none; }
+.note-cloud-sync-status.syncing svg { animation:note-cloud-breathe 1.2s ease-in-out infinite; }
+.note-cloud-sync-status.error { color:#ff8b94; }
+.note-cloud-sync-status.error .note-cloud-check { display:none; }
+@keyframes note-cloud-breathe { 50% { opacity:.45; transform:translateY(-1px); } }
 .note-share-button { height:34px; display:flex; align-items:center; gap:6px; padding:0 12px; border:1px solid rgba(110,168,254,.3); border-radius:10px; background:rgba(110,168,254,.1); color:var(--accent); font-size:10px; cursor:pointer; transition:.18s; }
 .note-share-button svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
 .note-share-button:hover { color:var(--text); border-color:rgba(110,168,254,.48); background:rgba(110,168,254,.17); transform:translateY(-1px); }
