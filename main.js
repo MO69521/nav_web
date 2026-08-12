@@ -625,10 +625,10 @@ function galleryBoards() {
 function galleryColumnsForSize(size = gallerySize) {
   const desktopColumns = [14, 8, 7, 5, 4, 3][Math.max(1, Math.min(6, size)) - 1];
   const viewportLimit = window.innerWidth <= 480 ? 2
-    : window.innerWidth <= 900 ? 3
-      : window.innerWidth <= 1100 ? 4
-        : window.innerWidth <= 1280 ? 5
-          : window.innerWidth <= 1600 ? 6
+    : window.innerWidth <= 760 ? 3
+      : window.innerWidth <= 900 ? 4
+        : window.innerWidth <= 1100 ? 6
+          : window.innerWidth <= 1280 ? 8
             : 14;
   return Math.min(desktopColumns, viewportLimit);
 }
