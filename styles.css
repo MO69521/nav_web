@@ -29,6 +29,15 @@ button { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 :where(button.specular-button, [role="button"].specular-button) { --specular-rgb:255,255,255; position:relative; isolation:isolate; }
 .specular-button-glow { position:absolute; z-index:2; inset:-1px; padding:1px; border-radius:inherit; pointer-events:none; opacity:var(--specular-opacity,0); background:conic-gradient(from var(--specular-angle,2.4rad),rgba(var(--specular-rgb),1) 0deg,rgba(var(--specular-rgb),0) 40deg,rgba(var(--specular-rgb),0) 140deg,rgba(var(--specular-rgb),1) 180deg,rgba(var(--specular-rgb),0) 220deg,rgba(var(--specular-rgb),0) 320deg,rgba(var(--specular-rgb),1) 360deg); filter:drop-shadow(0 0 5px rgba(var(--specular-rgb),.48)); -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; will-change:opacity,background; }
+.app-button { --app-button-border:rgba(82,82,82,.52); --app-button-bg:rgba(255,255,255,.012); --app-button-hover-bg:rgba(255,255,255,.035); --app-button-color:var(--muted); box-sizing:border-box; border:1px solid var(--app-button-border) !important; border-radius:12px !important; background:var(--app-button-bg) !important; color:var(--app-button-color) !important; box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 24px rgba(0,0,0,.08); transition:border-color .18s ease,background-color .18s ease,color .18s ease,transform .18s ease,box-shadow .18s ease !important; }
+.app-button:hover:not(:disabled) { border-color:rgba(110,168,254,.4) !important; background:var(--app-button-hover-bg) !important; color:var(--text) !important; transform:translateY(-1px); }
+.app-button:active:not(:disabled) { transform:scale(.97); }
+.app-button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.app-button:disabled { cursor:not-allowed; opacity:.5; transform:none !important; }
+.app-button-primary { --app-button-border:rgba(110,168,254,.4); --app-button-bg:rgba(110,168,254,.11); --app-button-hover-bg:rgba(110,168,254,.18); --app-button-color:var(--accent); font-weight:650; }
+.app-button-danger { --app-button-border:rgba(255,139,148,.25); --app-button-bg:rgba(255,139,148,.035); --app-button-hover-bg:rgba(255,139,148,.09); --app-button-color:#ff9aa2; }
+.light-theme .app-button { --app-button-border:rgba(31,42,56,.16); --app-button-bg:rgba(255,255,255,.34); --app-button-hover-bg:rgba(255,255,255,.7); box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 8px 24px rgba(43,49,44,.06); }
+.light-theme .app-button-primary { --app-button-border:rgba(83,145,232,.35); --app-button-bg:rgba(83,145,232,.1); --app-button-hover-bg:rgba(83,145,232,.17); }
 
 .app-shell { min-height: 100vh; }
 .sidebar { position: fixed; inset: 0 auto 0 0; width: 250px; padding: 28px 20px 22px; display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); backdrop-filter: blur(30px); z-index: 20; }

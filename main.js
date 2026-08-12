@@ -1,7 +1,7 @@
 import { initAurora } from './aurora.js';
 import { createDragSortEffect } from './drag-sort-effect.js';
 import { createRotatingText } from './rotating-text.js';
-import { createSpecularButtonGroup } from './specular-button.js';
+import { createButtonSystem } from './specular-button.js';
 import { hydrateRollingNavLabels, rollingNavLabel } from './rolling-nav.js';
 import { createPublicShareURL, createShareToken, isSafeNoteImageSource, shouldPreferLocalNote } from './cloud-content.js';
 import {
@@ -7201,7 +7201,7 @@ renderSites();
 applyGallerySize();
 loadActiveNote();
 switchWorkspaceView(currentWorkspaceView, { persist: false });
-createSpecularButtonGroup(document, { proximity: 250 });
+createButtonSystem(document, { proximity: 250 });
 initAurora($('#auroraTop'));
 updateTime();
 setInterval(updateTime, 1000);

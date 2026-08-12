@@ -104,45 +104,92 @@ export function createSpecularButton(element, options = {}) {
   };
 }
 
-function borderColorIsVisible(color = '') {
-  if (!color || color === 'transparent') return false;
-  const alpha = color.match(/^rgba?\([^/)]*(?:\/|,)\s*([\d.]+)\s*\)$/)?.[1];
-  return alpha === undefined || Number(alpha) > 0.06;
+const BUTTON_COMPONENT_EXCLUSIONS = [
+  '[data-button="off"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '.workspace-nav button',
+  '.category-tabs > .nav-item',
+  '.category-add',
+  '.gallery-mode-tabs button',
+  '.gallery-board-filters button',
+  '.theme-options button',
+  '.engine-menu button',
+  '.quick-searches button',
+  '.auth-help button',
+  '.search-trigger',
+  '.search-submit',
+  '.avatar',
+  '.setting-switch',
+  '.add-site-card',
+  '.more-btn',
+  '.delete-btn',
+  '.gallery-pin-preview',
+  '.gallery-pin-remove',
+  '.gallery-board-card',
+  '.note-list-item',
+  '.note-outline-collapse',
+  '.note-title-emoji-button',
+  '.note-cloud-sync-status',
+  '.note-block-drag-handle',
+  '.note-selection-bubble button',
+  '.note-line-spacing-menu button',
+  '.note-table-tools button',
+  '.note-table-handle',
+  '.note-table-axis-handle',
+  '.note-table-insert-handle',
+  '.note-table-content-drag-handle',
+  '.note-title-emoji-menu button',
+  '.note-callout-emoji-menu button',
+  '.note-heading-tools button',
+  '.note-slash-item',
+  '.group-sort-item'
+].join(',');
+
+function isButtonComponent(element) {
+  if (!(element instanceof Element)) return false;
+  if (!element.matches('button, [role="button"], [data-button], [data-specular-outline]')) return false;
+  return !element.matches(BUTTON_COMPONENT_EXCLUSIONS);
 }
 
-export function isOutlinedButton(element) {
-  if (!(element instanceof Element) || element.matches('[data-specular="off"]')) return false;
-  if (!element.matches('button, [role="button"], [data-specular-outline]')) return false;
-  if (element.hasAttribute('hidden') || getComputedStyle(element).display === 'none') return false;
-  if (element.matches('[data-specular-outline]')) return true;
-
-  const style = getComputedStyle(element);
-  const outlinedSides = ['Top', 'Right', 'Bottom', 'Left'].filter(side => {
-    const width = parseFloat(style[`border${side}Width`]) || 0;
-    const borderStyle = style[`border${side}Style`];
-    const color = style[`border${side}Color`];
-    return width >= 1 && borderStyle !== 'none' && borderStyle !== 'hidden' && borderColorIsVisible(color);
-  });
-  const hasRoundedContour = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]
-    .some(radius => (parseFloat(radius) || 0) > 0);
-  return outlinedSides.length === 4 && hasRoundedContour;
+function buttonVariant(element) {
+  if (element.matches('[data-button="danger"], .danger, .note-delete-button, .auth-logout')) return 'danger';
+  if (element.matches('[data-button="primary"], .primary, .auth-submit, .bookmark-local-confirm')) return 'primary';
+  return 'default';
 }
 
-export function createSpecularButtonGroup(root = document, options = {}) {
+function applyButtonComponent(element) {
+  if (!isButtonComponent(element)) return false;
+  const variant = buttonVariant(element);
+  element.classList.add('app-button');
+  element.classList.toggle('app-button-primary', variant === 'primary');
+  element.classList.toggle('app-button-danger', variant === 'danger');
+  return true;
+}
+
+function removeButtonComponent(element) {
+  element.classList.remove('app-button', 'app-button-primary', 'app-button-danger');
+}
+
+export function createButtonSystem(root = document, options = {}) {
   const cleanups = new Map();
-  const selector = 'button, [role="button"], [data-specular-outline]';
+  const selector = 'button, [role="button"], [data-button], [data-specular-outline]';
 
   function connect(element) {
-    if (!(element instanceof Element) || !element.matches(selector) || cleanups.has(element) || !isOutlinedButton(element)) return;
+    if (!(element instanceof Element) || !element.matches(selector) || cleanups.has(element) || !applyButtonComponent(element)) return;
     cleanups.set(element, createSpecularButton(element, options));
   }
 
   function reconcile(element) {
     if (!(element instanceof Element) || !element.matches(selector)) return;
-    if (isOutlinedButton(element)) connect(element);
+    if (isButtonComponent(element)) {
+      applyButtonComponent(element);
+      connect(element);
+    }
     else if (cleanups.has(element)) {
       cleanups.get(element)();
       cleanups.delete(element);
+      removeButtonComponent(element);
     }
   }
 
@@ -157,10 +204,12 @@ export function createSpecularButtonGroup(root = document, options = {}) {
     if (cleanups.has(node)) {
       cleanups.get(node)();
       cleanups.delete(node);
+      removeButtonComponent(node);
     }
     node.querySelectorAll(selector).forEach(element => {
       cleanups.get(element)?.();
       cleanups.delete(element);
+      removeButtonComponent(element);
     });
   }
 
@@ -176,7 +225,10 @@ export function createSpecularButtonGroup(root = document, options = {}) {
 
   return () => {
     observer.disconnect();
-    cleanups.forEach(cleanup => cleanup());
+    cleanups.forEach((cleanup, element) => {
+      cleanup();
+      removeButtonComponent(element);
+    });
     cleanups.clear();
   };
 }
