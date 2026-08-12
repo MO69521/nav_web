@@ -8,13 +8,20 @@
       @touchstart="handleTouchStart"
       @touchend="handleTouchEnd"
     >
-      <div class="elastic-slider-icon" :style="{ transform: `translateX(${leftIconTranslateX}px) scale(${leftIconScale})` }">
+      <button
+        class="elastic-slider-icon"
+        type="button"
+        aria-label="缩小图片"
+        :disabled="isAtMinimum"
+        :style="{ transform: `translateX(${leftIconTranslateX}px) scale(${leftIconScale})` }"
+        @click="nudgeValue(-1)"
+      >
         <slot name="left-icon">
           <component :is="leftIcon" v-if="leftIcon && typeof leftIcon === 'object'" />
           <span v-else-if="leftIcon">{{ leftIcon }}</span>
           <span v-else>-</span>
         </slot>
-      </div>
+      </button>
 
       <div
         ref="sliderRef"
@@ -48,13 +55,20 @@
         </div>
       </div>
 
-      <div class="elastic-slider-icon" :style="{ transform: `translateX(${rightIconTranslateX}px) scale(${rightIconScale})` }">
+      <button
+        class="elastic-slider-icon"
+        type="button"
+        aria-label="放大图片"
+        :disabled="isAtMaximum"
+        :style="{ transform: `translateX(${rightIconTranslateX}px) scale(${rightIconScale})` }"
+        @click="nudgeValue(1)"
+      >
         <slot name="right-icon">
           <component :is="rightIcon" v-if="rightIcon && typeof rightIcon === 'object'" />
           <span v-else-if="rightIcon">{{ rightIcon }}</span>
           <span v-else>+</span>
         </slot>
-      </div>
+      </button>
     </div>
   </div>
 </template>
@@ -115,6 +129,8 @@ watch(clientX, latest => {
 });
 
 const rangePercentage = computed(() => ((value.value - props.startingValue) / (props.maxValue - props.startingValue)) * 100);
+const isAtMinimum = computed(() => value.value <= props.startingValue);
+const isAtMaximum = computed(() => value.value >= props.maxValue);
 const sliderScaleX = computed(() => sliderRef.value ? 1 + overflow.value / sliderRef.value.getBoundingClientRect().width : 1);
 const sliderScaleY = computed(() => 1 + (overflow.value / MAX_OVERFLOW) * -.2);
 const transformOrigin = computed(() => {
@@ -217,13 +233,22 @@ function handleKeydown(event: KeyboardEvent) {
   value.value = Math.min(props.maxValue, Math.max(props.startingValue, value.value + direction * props.stepSize));
 }
 
+function nudgeValue(direction: -1 | 1) {
+  const increment = props.isStepped ? props.stepSize : (props.maxValue - props.startingValue) / 100;
+  value.value = Math.min(props.maxValue, Math.max(props.startingValue, value.value + direction * increment));
+  animateIconScale(direction < 0 ? leftIconScale : rightIconScale);
+}
+
 onMounted(() => { value.value = props.defaultValue; });
 </script>
 
 <style scoped>
 .elastic-slider { position:relative; width:12rem; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; color:var(--muted); }
 .elastic-slider-row { width:100%; display:flex; align-items:center; justify-content:center; gap:1rem; touch-action:none; user-select:none; }
-.elastic-slider-icon { flex:0 0 auto; min-width:10px; color:var(--text); font-size:20px; line-height:1; text-align:center; transition:transform .2s ease-out; }
+.elastic-slider-icon { flex:0 0 auto; min-width:24px; min-height:24px; padding:0; border:0; border-radius:50%; color:var(--text); background:transparent; font:inherit; font-size:20px; line-height:1; text-align:center; cursor:pointer; transition:color .18s ease, background .18s ease, transform .2s ease-out; }
+.elastic-slider-icon:hover:not(:disabled) { color:var(--accent); background:rgba(110,168,254,.12); }
+.elastic-slider-icon:focus-visible { outline:2px solid rgba(110,168,254,.55); outline-offset:2px; }
+.elastic-slider-icon:disabled { color:var(--muted); cursor:default; opacity:.42; }
 .elastic-slider-control { position:relative; flex:1; width:100%; max-width:20rem; display:flex; align-items:center; padding:1rem 0; outline:0; cursor:grab; touch-action:none; user-select:none; }
 .elastic-slider-control:active { cursor:grabbing; }
 .elastic-slider-control:focus-visible { border-radius:8px; box-shadow:0 0 0 2px rgba(110,168,254,.28); }
