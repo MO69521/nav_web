@@ -3960,6 +3960,14 @@ function renderNoteTitleEmojiMenu() {
     <button type="button" role="menuitem" class="clear" data-note-title-emoji-clear ${selectedEmoji ? '' : 'disabled'}>清除标题 Emoji</button>`;
 }
 
+function renderNoteTitleEmojiButton() {
+  const selectedEmoji = noteTitleLeadingEmoji();
+  const button = $('#noteTitleEmojiButton');
+  button.classList.toggle('has-emoji', Boolean(selectedEmoji));
+  button.textContent = selectedEmoji ? '' : '☺';
+  button.setAttribute('aria-label', selectedEmoji ? `更换标题 Emoji：${selectedEmoji}` : '添加标题 Emoji');
+}
+
 function closeNoteTitleEmojiMenu() {
   $('#noteTitleEmojiMenu').hidden = true;
   $('#noteTitleEmojiButton').setAttribute('aria-expanded', 'false');
@@ -3971,12 +3979,6 @@ function toggleNoteTitleEmojiMenu() {
     closeNoteTitleEmojiMenu();
     return;
   }
-  if (!noteTitleLeadingEmoji()) {
-    const title = $('#noteTitle');
-    captureNoteHistory('title:emoji');
-    title.value = `📄${title.value.trim() ? ` ${title.value.trimStart()}` : ''}`;
-    scheduleNoteSave();
-  }
   renderNoteTitleEmojiMenu();
   menu.hidden = false;
   $('#noteTitleEmojiButton').setAttribute('aria-expanded', 'true');
@@ -3987,6 +3989,7 @@ function applyNoteTitleEmoji(emoji = '') {
   const remainingTitle = noteTitleWithoutLeadingEmoji(title.value);
   captureNoteHistory('title:emoji');
   title.value = emoji ? `${emoji}${remainingTitle ? ` ${remainingTitle}` : ''}` : remainingTitle;
+  renderNoteTitleEmojiButton();
   closeNoteTitleEmojiMenu();
   title.focus({ preventScroll: true });
   title.setSelectionRange(title.value.length, title.value.length);
@@ -4016,6 +4019,7 @@ function loadActiveNote({ focusTitle = false } = {}) {
   hideNoteHeadingTools({ immediate: true });
   $('#noteSelectionBubble').hidden = true;
   $('#noteTitle').value = note.title || '';
+  renderNoteTitleEmojiButton();
   $('#noteEditor').innerHTML = sanitizeNoteHTML(note.content);
   const sharedMode = isActiveSharedNote();
   const sharedReadOnly = Boolean(sharedMode && activeSharedNote.sharePermission !== 'edit');
@@ -5101,7 +5105,10 @@ $('#noteImageInput').addEventListener('change', event => {
 });
 $('#noteTitle').addEventListener('beforeinput', event => captureNoteHistory(`title:${event.inputType}`));
 $('#noteEditor').addEventListener('beforeinput', event => captureNoteHistory(`editor:${event.inputType}`));
-$('#noteTitle').addEventListener('input', scheduleNoteSave);
+$('#noteTitle').addEventListener('input', () => {
+  renderNoteTitleEmojiButton();
+  scheduleNoteSave();
+});
 $('#noteTitleEmojiButton').addEventListener('pointerdown', event => event.preventDefault());
 $('#noteTitleEmojiButton').addEventListener('click', toggleNoteTitleEmojiMenu);
 $('#noteTitleEmojiMenu').addEventListener('pointerdown', event => event.preventDefault());
