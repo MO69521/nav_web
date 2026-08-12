@@ -22,6 +22,7 @@ import { createApp, h, reactive } from 'vue';
 import SplashCursor from './SplashCursor.vue';
 import CircularGallery from './CircularGallery.vue';
 import LineSidebar from './LineSidebar.vue';
+import ElasticSlider from './ElasticSlider.vue';
 
 const baseSites = [
   { id: 'figma', name: 'Figma', url: 'https://www.figma.com', desc: '协作式界面设计工具', category: 'design', color: '#f05b42', icon: 'F' },
@@ -135,6 +136,7 @@ let circularGallerySignature = galleryItems.map(item => `${item.id}:${item.image
 let currentGalleryMode = 'pins';
 let currentGalleryBoard = '全部';
 let activeGalleryItemId = null;
+let gallerySize = Math.min(5, Math.max(1, Number(store.get('mos-gallery-size', 3)) || 3));
 const initialNoteTime = Date.now();
 const defaultNotes = [{
   id: 'note-welcome',
@@ -620,6 +622,24 @@ function galleryBoards() {
   return [...new Set(galleryItems.map(item => item.board).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
+function galleryColumnsForSize(size = gallerySize) {
+  const desktopColumns = [10, 8, 7, 5, 4][Math.max(1, Math.min(5, size)) - 1];
+  const viewportLimit = window.innerWidth <= 480 ? 2
+    : window.innerWidth <= 900 ? 3
+      : window.innerWidth <= 1100 ? 4
+        : window.innerWidth <= 1280 ? 5
+          : window.innerWidth <= 1600 ? 6
+            : 10;
+  return Math.min(desktopColumns, viewportLimit);
+}
+
+function applyGallerySize(size = gallerySize, { persist = false } = {}) {
+  gallerySize = Math.max(1, Math.min(5, Math.round(size)));
+  $('#galleryGrid')?.style.setProperty('--gallery-columns', galleryColumnsForSize(gallerySize));
+  if (persist) store.set('mos-gallery-size', gallerySize);
+  requestAnimationFrame(() => requestAnimationFrame(layoutGalleryMasonry));
+}
+
 function layoutGalleryMasonry() {
   const grid = $('#galleryGrid');
   if (!grid || grid.hidden || $('#galleryView').hidden) return;
@@ -675,6 +695,7 @@ function renderGallery() {
   $('#galleryGrid').hidden = showingBoards;
   $('#galleryBoards').hidden = !showingBoards;
   $('#galleryBoardFilters').hidden = showingBoards;
+  $('#gallerySizeControl').hidden = showingBoards;
   $('#galleryEmptyState').hidden = showingBoards ? boards.length > 0 : visibleItems.length > 0;
   $$('.gallery-mode-tabs [data-gallery-mode]').forEach(button => {
     const active = button.dataset.galleryMode === currentGalleryMode;
@@ -6286,7 +6307,7 @@ $('#galleryGrid').addEventListener('error', event => {
 let galleryResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(galleryResizeTimer);
-  galleryResizeTimer = setTimeout(layoutGalleryMasonry, 100);
+  galleryResizeTimer = setTimeout(() => applyGallerySize(), 100);
 });
 
 const galleryAddDialog = $('#galleryAddDialog');
@@ -7158,10 +7179,25 @@ createApp({
     });
   }
 }).mount('#circularGalleryMount');
+createApp({
+  name: 'GallerySizeControlMount',
+  setup() {
+    return () => h(ElasticSlider, {
+      defaultValue: gallerySize,
+      startingValue: 1,
+      maxValue: 5,
+      isStepped: true,
+      stepSize: 1,
+      ariaLabel: '调节图库图片大小',
+      onChange: value => applyGallerySize(value, { persist: true })
+    });
+  }
+}).mount('#gallerySizeControl');
 const rotatingGreeting = createRotatingText($('#greeting'), { texts: ['上午好'], interval: 2600, stagger: 28 });
 renderEngines();
 renderCategoryOptions();
 renderSites();
+applyGallerySize();
 loadActiveNote();
 switchWorkspaceView(currentWorkspaceView, { persist: false });
 createSpecularButtonGroup(document, { proximity: 250 });
