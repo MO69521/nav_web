@@ -91,6 +91,8 @@ let cloudWorkspaceUserKey = '';
 let cloudWorkspaceErrorShown = false;
 let cloudWorkspaceInitPromise = null;
 let cloudWorkspaceStatus = 'local';
+let cloudWorkspaceRefreshPromise = null;
+let lastCloudWorkspaceAt = 0;
 
 const store = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
@@ -323,12 +325,15 @@ function mergeWorkspaceDocuments(localWorkspace, cloudWorkspace) {
 }
 
 async function putCloudWorkspace(workspace = cloudWorkspaceSnapshot()) {
-  await writeCloudWorkspace(currentUser, workspace);
-  return { ok: true };
+  const payload = { ...workspace, updatedAt: Date.now() };
+  await writeCloudWorkspace(currentUser, payload);
+  lastCloudWorkspaceAt = payload.updatedAt;
+  return payload;
 }
 
 async function syncCloudWorkspace() {
   if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser) return;
+  cloudWorkspaceSyncTimer = null;
   setCloudWorkspaceStatus('syncing');
   try {
     await putCloudWorkspace();
@@ -357,7 +362,42 @@ function resetCloudWorkspaceSession() {
   cloudWorkspaceUserKey = '';
   cloudWorkspaceErrorShown = false;
   cloudWorkspaceInitPromise = null;
+  cloudWorkspaceRefreshPromise = null;
+  lastCloudWorkspaceAt = 0;
   setCloudWorkspaceStatus('local');
+}
+
+async function refreshCloudWorkspace() {
+  if (!cloudWorkspaceReady || cloudWorkspaceApplying || !currentUser || isActiveSharedNote()) return;
+  if (cloudWorkspaceRefreshPromise || cloudWorkspaceInitPromise || cloudWorkspaceSyncTimer || noteSaveTimer) return;
+  if (cloudWorkspaceStatus === 'error') return;
+  const userKey = cloudWorkspaceUserKey;
+  cloudWorkspaceRefreshPromise = (async () => {
+    try {
+      const cloudWorkspace = await readCloudWorkspace(currentUser);
+      if (!cloudWorkspace || userKey !== cloudWorkspaceUserKey || !currentUser) return;
+      const cloudUpdatedAt = Number(cloudWorkspace.updatedAt) || 0;
+      if (cloudUpdatedAt <= lastCloudWorkspaceAt) return;
+      const localActiveNoteId = activeNoteId;
+      const remoteNotes = normalizeCloudNotes(cloudWorkspace.notes);
+      applyCloudWorkspace({
+        ...cloudWorkspace,
+        activeNoteId: remoteNotes.some(note => note.id === localActiveNoteId) ? localActiveNoteId : cloudWorkspace.activeNoteId
+      });
+      lastCloudWorkspaceAt = cloudUpdatedAt;
+      cloudWorkspaceErrorShown = false;
+      setCloudWorkspaceStatus('synced');
+    } catch (error) {
+      setCloudWorkspaceStatus('error');
+      if (!cloudWorkspaceErrorShown) {
+        cloudWorkspaceErrorShown = true;
+        showToast(`${error.message || '云端刷新失败'}，当前继续使用本机内容`, { duration: 4200 });
+      }
+    } finally {
+      cloudWorkspaceRefreshPromise = null;
+    }
+  })();
+  return cloudWorkspaceRefreshPromise;
 }
 
 async function initializeCloudWorkspace({ announce = false } = {}) {
@@ -375,6 +415,7 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
     try {
       const cloudWorkspace = await readCloudWorkspace(currentUser);
       if (cloudWorkspace) {
+        lastCloudWorkspaceAt = Number(cloudWorkspace.updatedAt) || 0;
         const mergedWorkspace = mergeWorkspaceDocuments(cloudWorkspaceSnapshot(), cloudWorkspace);
         applyCloudWorkspace(mergedWorkspace);
         await putCloudWorkspace(mergedWorkspace);
@@ -397,6 +438,14 @@ async function initializeCloudWorkspace({ announce = false } = {}) {
   })();
   return cloudWorkspaceInitPromise;
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshCloudWorkspace();
+});
+window.addEventListener('focus', refreshCloudWorkspace);
+setInterval(() => {
+  if (document.visibilityState === 'visible') refreshCloudWorkspace();
+}, 12000);
 
 hydrateRollingNavLabels();
 const allSites = () => {
