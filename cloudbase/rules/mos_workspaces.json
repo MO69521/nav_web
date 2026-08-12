@@ -1,6 +1,6 @@
 {
-  "read": "auth != null && auth.loginType != 'ANONYMOUS' && doc.ownerId == auth.uid",
+  "read": "auth != null && auth.loginType != 'ANONYMOUS' && doc._id == auth.uid",
   "create": "auth != null && auth.loginType != 'ANONYMOUS' && doc._id == auth.uid && doc.ownerId == auth.uid",
-  "update": "auth != null && auth.loginType != 'ANONYMOUS' && get(`database.mos_workspaces.${doc._id}`).ownerId == auth.uid && doc.ownerId == auth.uid",
-  "delete": "auth != null && auth.loginType != 'ANONYMOUS' && doc.ownerId == auth.uid"
+  "update": "auth != null && auth.loginType != 'ANONYMOUS' && doc._id == auth.uid",
+  "delete": "auth != null && auth.loginType != 'ANONYMOUS' && doc._id == auth.uid"
 }

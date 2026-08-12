@@ -31,3 +31,14 @@ export function isSafeNoteImageSource(value) {
     || /^https:\/\//i.test(source)
     || /^\/media\/[a-zA-Z0-9_-]{20,64}$/.test(source);
 }
+
+export function shouldPreferLocalNote(localNote, cloudNote, pristineNote) {
+  if (!cloudNote) return true;
+  const isPristineLocal = localNote?.id === pristineNote?.id
+    && localNote?.title === pristineNote?.title
+    && localNote?.content === pristineNote?.content;
+  const cloudHasRealEdits = cloudNote?.title !== pristineNote?.title
+    || cloudNote?.content !== pristineNote?.content;
+  if (isPristineLocal && cloudHasRealEdits) return false;
+  return Number(localNote?.updatedAt) >= Number(cloudNote?.updatedAt);
+}

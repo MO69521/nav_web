@@ -3,7 +3,7 @@ import { createDragSortEffect } from './drag-sort-effect.js';
 import { createRotatingText } from './rotating-text.js';
 import { createSpecularButton, createSpecularButtonGroup } from './specular-button.js';
 import { hydrateRollingNavLabels, rollingNavLabel } from './rolling-nav.js';
-import { createPublicShareURL, createShareToken, isSafeNoteImageSource } from './cloud-content.js';
+import { createPublicShareURL, createShareToken, isSafeNoteImageSource, shouldPreferLocalNote } from './cloud-content.js';
 import {
   CloudBaseConfigError,
   beginCloudBaseEmailOtp,
@@ -159,7 +159,9 @@ let activeNoteId = store.get('mos-active-note-id', notes[0].id);
 let activeSharedNote = null;
 let localNoteIdBeforeShare = null;
 let sharedNoteSaveTimer = null;
-let currentWorkspaceView = 'bookmarks';
+const workspaceViews = new Set(['bookmarks', 'gallery', 'notes']);
+const savedWorkspaceView = store.get('mos-workspace-view', 'bookmarks');
+let currentWorkspaceView = workspaceViews.has(savedWorkspaceView) ? savedWorkspaceView : 'bookmarks';
 let noteSaveTimer = null;
 let savedNoteRange = null;
 let savedNoteCaretRange = null;
@@ -308,7 +310,7 @@ function mergeWorkspaceDocuments(localWorkspace, cloudWorkspace) {
   for (const note of normalizeCloudNotes(cloudWorkspace?.notes)) mergedNotes.set(note.id, note);
   for (const note of normalizeCloudNotes(localWorkspace?.notes)) {
     const cloudNote = mergedNotes.get(note.id);
-    if (!cloudNote || Number(note.updatedAt) >= Number(cloudNote.updatedAt)) mergedNotes.set(note.id, note);
+    if (shouldPreferLocalNote(note, cloudNote, defaultNotes[0])) mergedNotes.set(note.id, note);
   }
   const notes = [...mergedNotes.values()];
   const localActiveId = localWorkspace?.activeNoteId;
@@ -685,7 +687,7 @@ async function loadSharedNoteFromLocation() {
       sharePermission: payload.permission === 'edit' ? 'edit' : 'view'
     };
     activeNoteId = activeSharedNote.id;
-    switchWorkspaceView('notes');
+    switchWorkspaceView('notes', { persist: false });
     showToast(activeSharedNote.sharePermission === 'edit' ? '已打开可编辑共享文档' : '已打开仅查看共享文档');
     return true;
   } catch (error) {
@@ -1399,31 +1401,33 @@ function ensureWritableLineAfterNoteImages() {
   return paragraph;
 }
 
-function focusWritableLineAfterNoteImages(event) {
+function focusWritableNoteCanvasLine(event) {
   if (event.button !== 0 || event.target !== $('#noteEditor')) return false;
   const editor = $('#noteEditor');
-  const blocks = [...editor.children];
-  const imageIndex = blocks.findLastIndex(block => block.matches('figure, .note-image-grid, table.note-table'));
-  if (imageIndex < 0) return false;
-  const imageBlock = blocks[imageIndex];
-  if (event.clientY <= imageBlock.getBoundingClientRect().bottom) return false;
-  const followingBlocks = blocks.slice(imageIndex + 1);
-  const onlyEmptyTail = followingBlocks.every(block => block.tagName === 'P' && !block.textContent.trim());
-  if (!onlyEmptyTail) return false;
-  let paragraph = followingBlocks.find(block => block.classList.contains('note-image-afterline')) || followingBlocks[0];
-  if (!paragraph) paragraph = ensureWritableLineAfterNoteImages();
+  if (editor.contentEditable === 'false') return false;
+  const blocks = [...editor.children].filter(block => !block.classList.contains('note-section-hidden'));
+  const lastBlock = blocks.at(-1);
+  if (lastBlock && event.clientY <= lastBlock.getBoundingClientRect().bottom) return false;
+
+  const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight) || 28;
+  const paragraphSample = [...blocks].reverse().find(block => block.tagName === 'P');
+  const paragraphMargin = Number.parseFloat(paragraphSample ? getComputedStyle(paragraphSample).marginBottom : '') || Number.parseFloat(getComputedStyle(editor).fontSize) || 15;
+  const lineAdvance = lineHeight + paragraphMargin;
+  const editorTop = editor.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(editor).paddingTop || 0);
+  const lastBottom = lastBlock?.getBoundingClientRect().bottom ?? editorTop;
+  const linesToAdd = Math.min(80, Math.max(1, Math.ceil((event.clientY - lastBottom) / lineAdvance)));
+  captureNoteHistory('editor:canvas-line');
+  let paragraph = null;
+  for (let index = 0; index < linesToAdd; index += 1) {
+    paragraph = document.createElement('p');
+    paragraph.innerHTML = '<br>';
+    editor.append(paragraph);
+  }
   if (!paragraph) return false;
-  paragraph.classList.add('note-image-afterline');
-  if (!paragraph.childNodes.length) paragraph.innerHTML = '<br>';
   editor.focus({ preventScroll: true });
   const range = document.createRange();
-  if (paragraph.childNodes.length === 1 && paragraph.firstElementChild?.tagName === 'BR') {
-    range.setStart(paragraph, 0);
-    range.collapse(true);
-  } else {
-    range.selectNodeContents(paragraph);
-    range.collapse(false);
-  }
+  range.setStart(paragraph, 0);
+  range.collapse(true);
   const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
@@ -1624,7 +1628,7 @@ function finishNoteMarqueeSelection(event) {
     event.preventDefault();
     $('#noteEditor').focus({ preventScroll: true });
   } else {
-    focusWritableLineAfterNoteImages(event);
+    focusWritableNoteCanvasLine(event);
   }
 }
 
@@ -4352,7 +4356,8 @@ function showToast(message, { duration = 1800, actionLabel, onAction } = {}) {
 
 function updateTime() {
   const now = new Date();
-  $('#clock').textContent = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  $('#clockHour').textContent = String(now.getHours()).padStart(2, '0');
+  $('#clockMinute').textContent = String(now.getMinutes()).padStart(2, '0');
   const hour = now.getHours();
   const period = hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
   if (period !== greetingPeriod) {
@@ -4801,13 +4806,15 @@ function finishPointerDrag(event) {
 siteGrid.addEventListener('pointerup', finishPointerDrag);
 siteGrid.addEventListener('pointercancel', finishPointerDrag);
 
-function switchWorkspaceView(view) {
-  if (currentWorkspaceView === 'notes' && view !== 'notes') saveActiveNote();
-  if (currentWorkspaceView === 'notes' && view !== 'notes' && !$('#noteSharePanel').hidden) closeNoteSharePanel();
-  currentWorkspaceView = view;
-  const showBookmarks = view === 'bookmarks';
-  const showGallery = view === 'gallery';
-  const showNotes = view === 'notes';
+function switchWorkspaceView(view, { persist = true } = {}) {
+  const nextView = workspaceViews.has(view) ? view : 'bookmarks';
+  if (currentWorkspaceView === 'notes' && nextView !== 'notes') saveActiveNote();
+  if (currentWorkspaceView === 'notes' && nextView !== 'notes' && !$('#noteSharePanel').hidden) closeNoteSharePanel();
+  currentWorkspaceView = nextView;
+  if (persist) store.set('mos-workspace-view', currentWorkspaceView);
+  const showBookmarks = currentWorkspaceView === 'bookmarks';
+  const showGallery = currentWorkspaceView === 'gallery';
+  const showNotes = currentWorkspaceView === 'notes';
   if (showGallery) renderGallery();
   if (showNotes) loadActiveNote();
   document.body.classList.toggle('notes-workspace-active', showNotes);
@@ -7062,6 +7069,7 @@ renderEngines();
 renderCategoryOptions();
 renderSites();
 loadActiveNote();
+switchWorkspaceView(currentWorkspaceView, { persist: false });
 createSpecularButtonGroup(document, { proximity: 250 });
 createSpecularButton($('#noteSlashMenu'), { proximity: 320 });
 initAurora($('#auroraTop'));
