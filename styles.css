@@ -320,7 +320,7 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .notes-sidebar-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; padding:0 17px 0 2px; }
 .notes-sidebar-header h2 { margin:0; font-size:20px; line-height:36px; letter-spacing:-.03em; }
 .notes-new-button { flex:0 0 36px; width:36px; height:36px; display:grid; place-items:center; padding:0; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.025); color:var(--accent); cursor:pointer; transition:border-color .18s ease,background .18s ease,transform .18s ease; }
-.notes-new-button svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
+.notes-new-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 .notes-new-button:hover { border-color:rgba(110,168,254,.34); background:rgba(110,168,254,.1); transform:translateY(-1px); }
 .notes-list { height:calc(100% - 67px); display:grid; align-content:start; gap:5px; padding-right:14px; overflow:auto; scrollbar-width:thin; }
 .note-list-row { position:relative; min-width:0; }
