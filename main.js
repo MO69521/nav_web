@@ -55,19 +55,20 @@ const engines = [
   { name: '小红书', icon: 'RED', domain: 'xiaohongshu.com', url: 'https://www.xiaohongshu.com/search_result?keyword=' }
 ];
 
-const otomePlaceholder = index => `/gallery/otome/otome-${String(index).padStart(2, '0')}.png`;
-const defaultGalleryItems = [
-  { id: 'gallery-1', title: '自然光工作室', board: '空间灵感', image: otomePlaceholder(1), source: '' },
-  { id: 'gallery-2', title: '留白与秩序', board: '界面设计', image: otomePlaceholder(2), source: '' },
-  { id: 'gallery-3', title: '柔和色彩研究', board: '色彩情绪', image: otomePlaceholder(3), source: '' },
-  { id: 'gallery-4', title: '安静的阅读角', board: '空间灵感', image: otomePlaceholder(4), source: '' },
-  { id: 'gallery-5', title: '编辑式构图', board: '视觉版式', image: otomePlaceholder(5), source: '' },
-  { id: 'gallery-6', title: '日常咖啡记录', board: '生活方式', image: otomePlaceholder(6), source: '' },
-  { id: 'gallery-7', title: '克制的产品语言', board: '界面设计', image: otomePlaceholder(7), source: '' },
-  { id: 'gallery-8', title: '形体与材质', board: '视觉版式', image: otomePlaceholder(8), source: '' },
-  { id: 'gallery-9', title: '远方的蓝色', board: '色彩情绪', image: otomePlaceholder(9), source: '' },
-  { id: 'gallery-10', title: '人物与光影', board: '摄影参考', image: otomePlaceholder(10), source: '' }
-];
+const defaultGalleryItems = [];
+
+function isLegacyDefaultGalleryItem(item) {
+  const match = /^gallery-(10|[1-9])$/.exec(String(item?.id || ''));
+  if (!match) return false;
+  const imageNumber = String(match[1]).padStart(2, '0');
+  return new RegExp(`/gallery/otome/otome-${imageNumber}\\.png(?:[?#].*)?$`).test(String(item?.image || ''));
+}
+
+function normalizeGalleryItems(value) {
+  return Array.isArray(value)
+    ? value.filter(item => item && typeof item === 'object' && !isLegacyDefaultGalleryItem(item))
+    : [];
+}
 
 const cloudWorkspaceKeys = new Set([
   'mos-custom-sites',
@@ -119,15 +120,10 @@ let currentEngine = engines[0];
 let searchQuery = '';
 let activeGroupId = null;
 let currentUser = null;
-let galleryItems = store.get('mos-gallery-items', defaultGalleryItems);
-if (store.get('mos-gallery-anime-placeholder-version', 0) < 2) {
-  const defaultGalleryItemMap = new Map(defaultGalleryItems.map(item => [item.id, item]));
-  galleryItems = galleryItems.map(item => {
-    const placeholder = defaultGalleryItemMap.get(item.id);
-    return placeholder ? { ...item, image: placeholder.image, source: placeholder.source } : item;
-  });
+let galleryItems = normalizeGalleryItems(store.get('mos-gallery-items', defaultGalleryItems));
+if (store.get('mos-gallery-default-removal-version', 0) < 1) {
   store.set('mos-gallery-items', galleryItems);
-  store.set('mos-gallery-anime-placeholder-version', 2);
+  store.set('mos-gallery-default-removal-version', 1);
 }
 const circularGalleryState = reactive({
   items: galleryItems.map(item => ({ image: item.image, text: item.title }))
@@ -273,7 +269,7 @@ function applyCloudWorkspace(workspace) {
     hiddenSites = new Set(Array.isArray(workspace.hiddenSites) ? workspace.hiddenSites : []);
     siteOrder = Array.isArray(workspace.siteOrder) ? workspace.siteOrder : [];
     siteGroups = (Array.isArray(workspace.siteGroups) ? workspace.siteGroups : []).map(group => ({ ...group, parentId: group.parentId ?? null }));
-    galleryItems = Array.isArray(workspace.galleryItems) ? workspace.galleryItems : structuredClone(defaultGalleryItems);
+    galleryItems = normalizeGalleryItems(workspace.galleryItems);
     notes = normalizeCloudNotes(workspace.notes);
     const nextLocalNoteId = notes.some(note => note.id === workspace.activeNoteId) ? workspace.activeNoteId : notes[0]?.id;
     activeNoteId = nextLocalNoteId;
@@ -321,6 +317,7 @@ function mergeWorkspaceDocuments(localWorkspace, cloudWorkspace) {
   const localActiveId = localWorkspace?.activeNoteId;
   return {
     ...cloudWorkspace,
+    galleryItems: normalizeGalleryItems(cloudWorkspace?.galleryItems),
     notes,
     activeNoteId: notes.some(note => note.id === localActiveId) ? localActiveId : cloudWorkspace?.activeNoteId
   };
@@ -662,6 +659,7 @@ function renderGallery() {
     circularGalleryState.items = galleryItems.map(item => ({ image: item.image, text: item.title }));
   }
   const boards = galleryBoards();
+  document.body.classList.toggle('gallery-is-empty', galleryItems.length === 0);
   if (currentGalleryBoard !== '全部' && !boards.includes(currentGalleryBoard)) currentGalleryBoard = '全部';
   $('#galleryItemCount').textContent = galleryItems.length;
   $('#galleryBoardCount').textContent = boards.length;

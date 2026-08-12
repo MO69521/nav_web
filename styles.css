@@ -126,6 +126,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .circular-gallery-stage, .circular-gallery-stage canvas { width:100%; height:100%; display:block; }
 .circular-gallery-stage { position:relative; overflow:hidden; background:transparent; -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 7%,#000 93%,transparent 100%); mask-image:linear-gradient(90deg,transparent 0,#000 7%,#000 93%,transparent 100%); }
 .gallery-workspace-active .hero { min-height:clamp(250px,31vw,350px); padding:0; }
+.gallery-workspace-active.gallery-is-empty .hero { display:none; }
 .gallery-workspace-active .hero-copy, .gallery-workspace-active .clock-card { visibility:hidden; pointer-events:none; }
 .gallery-workspace-active .circular-gallery-mount { display:block; }
 .hero-copy { min-width: 0; max-width: 100%; }
