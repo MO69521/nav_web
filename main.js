@@ -79,6 +79,8 @@ const cloudWorkspaceKeys = new Set([
   'mos-site-groups',
   'mos-gallery-items',
   'mos-notes',
+  'mos-note-groups',
+  'mos-note-order',
   'mos-active-note-id',
   'mos-light-theme',
   'mos-splash-cursor-enabled',
@@ -156,6 +158,8 @@ notes = notes.filter(note => note && typeof note === 'object').map((note, index)
   }
 }));
 if (!notes.length) notes = structuredClone(defaultNotes);
+let noteGroups = normalizeNoteGroups(store.get('mos-note-groups', []));
+let noteOrder = normalizeNoteOrder(store.get('mos-note-order', []));
 let activeNoteId = store.get('mos-active-note-id', notes[0].id);
 let activeSharedNote = null;
 let localNoteIdBeforeShare = null;
@@ -231,6 +235,8 @@ function cloudWorkspaceSnapshot() {
     siteGroups,
     galleryItems,
     notes,
+    noteGroups,
+    noteOrder,
     activeNoteId: isActiveSharedNote() ? (localNoteIdBeforeShare || store.get('mos-active-note-id', notes[0]?.id)) : activeNoteId,
     settings: {
       lightTheme: Boolean(store.get('mos-light-theme', false)),
@@ -271,6 +277,8 @@ function applyCloudWorkspace(workspace) {
     siteGroups = (Array.isArray(workspace.siteGroups) ? workspace.siteGroups : []).map(group => ({ ...group, parentId: group.parentId ?? null }));
     galleryItems = normalizeGalleryItems(workspace.galleryItems);
     notes = normalizeCloudNotes(workspace.notes);
+    noteGroups = normalizeNoteGroups(workspace.noteGroups);
+    noteOrder = normalizeNoteOrder(workspace.noteOrder);
     const nextLocalNoteId = notes.some(note => note.id === workspace.activeNoteId) ? workspace.activeNoteId : notes[0]?.id;
     activeNoteId = nextLocalNoteId;
     const settings = workspace.settings && typeof workspace.settings === 'object' ? workspace.settings : {};
@@ -283,6 +291,8 @@ function applyCloudWorkspace(workspace) {
     store.set('mos-site-groups', siteGroups);
     store.set('mos-gallery-items', galleryItems);
     store.set('mos-notes', notes);
+    store.set('mos-note-groups', noteGroups);
+    store.set('mos-note-order', noteOrder);
     store.set('mos-active-note-id', nextLocalNoteId);
     store.set('mos-light-theme', Boolean(settings.lightTheme));
     store.set('mos-splash-cursor-enabled', settings.splashCursorEnabled !== false);
@@ -597,11 +607,7 @@ function renderSites() {
   });
   const groupedView = !query && currentCategory === 'all';
   const siteMarkup = groupedView ? renderGroupedSites(sites) : sites.map(siteCard).join('');
-  const actionButtons = query ? '' : `<div class="bookmark-grid-actions" role="group" aria-label="书签快捷操作">
-    <button class="add-site-card" type="button" data-action="open-add"><span data-specular-outline><i class="add-symbol">＋</i></span><strong>新增网址</strong></button>
-    <button class="add-site-card import-bookmarks-card" type="button" data-action="import-bookmarks" aria-label="从 Chrome、Safari、Edge 或 Firefox 导入书签"><span data-specular-outline><i class="add-symbol">↓</i></span><strong>导入书签</strong></button>
-  </div>`;
-  $('#siteGrid').innerHTML = `${siteMarkup}${actionButtons}`;
+  $('#siteGrid').innerHTML = siteMarkup;
   $('#siteGrid').classList.add('compact-grid');
   $('#emptyState').hidden = sites.length > 0 || !query;
   if (query && sites.length === 0) {
@@ -3679,14 +3685,104 @@ function persistNotes() {
   }
 }
 
-function renderNoteList() {
-  $('#notesList').innerHTML = [...notes]
+function normalizeNoteGroups(value) {
+  return (Array.isArray(value) ? value : [])
+    .filter(group => group && typeof group === 'object')
+    .map((group, index) => ({
+      id: String(group.id || `note-group-recovered-${index}`),
+      name: String(group.name || '新分组').slice(0, 24),
+      noteIds: Array.isArray(group.noteIds) ? group.noteIds.map(String) : [],
+      collapsed: Boolean(group.collapsed)
+    }));
+}
+
+function normalizeNoteOrder(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(String))];
+}
+
+function findNoteGroup(groupId) {
+  return noteGroups.find(group => group.id === groupId) ?? null;
+}
+
+function noteGroupOf(noteId) {
+  return noteGroups.find(group => group.noteIds.includes(noteId)) ?? null;
+}
+
+function persistNoteStructure() {
+  noteGroups.forEach(group => { group.name = group.name.slice(0, 24); });
+  store.set('mos-note-groups', noteGroups);
+  store.set('mos-note-order', noteOrder);
+}
+
+function uniqueNoteGroupName(baseName = '新分组') {
+  let name = baseName;
+  let suffix = 2;
+  while (noteGroups.some(group => group.name === name)) name = `${baseName} ${suffix++}`;
+  return name;
+}
+
+/**
+ * Drops references to deleted notes, removes empty groups and keeps noteOrder
+ * as the single source of truth for the sidebar's top level.
+ */
+function noteListEntries() {
+  const existingNoteIds = new Set(notes.map(note => note.id));
+  noteGroups.forEach(group => { group.noteIds = group.noteIds.filter(noteId => existingNoteIds.has(noteId)); });
+  noteGroups = noteGroups.filter(group => group.noteIds.length > 0);
+
+  const groupedNoteIds = new Set(noteGroups.flatMap(group => group.noteIds));
+  const groupIds = new Set(noteGroups.map(group => group.id));
+  const placed = new Set();
+  const entries = [];
+  noteOrder.forEach(id => {
+    if (placed.has(id)) return;
+    if (groupIds.has(id)) {
+      placed.add(id);
+      entries.push({ type: 'group', id });
+      return;
+    }
+    if (existingNoteIds.has(id) && !groupedNoteIds.has(id)) {
+      placed.add(id);
+      entries.push({ type: 'note', id });
+    }
+  });
+
+  const newGroups = noteGroups.filter(group => !placed.has(group.id)).map(group => ({ type: 'group', id: group.id }));
+  const newNotes = notes
+    .filter(note => !placed.has(note.id) && !groupedNoteIds.has(note.id))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-    .map(note => {
-      const excerpt = notePlainText(note.content) || '空白文档';
-      const title = note.title || '无标题文档';
-      return `<div class="note-list-row"><button class="note-list-item ${note.id === activeNoteId ? 'active' : ''}" type="button" role="option" aria-selected="${note.id === activeNoteId}" data-note-id="${escapeHTML(note.id)}"><strong>${escapeHTML(title)}</strong><p>${escapeHTML(excerpt)}</p><span>${formatNoteTime(note.updatedAt)}</span></button><button class="note-list-delete" type="button" data-note-delete-id="${escapeHTML(note.id)}" aria-label="删除${escapeHTML(title)}" title="删除笔记">×</button></div>`;
-    }).join('');
+    .map(note => ({ type: 'note', id: note.id }));
+  entries.unshift(...newGroups, ...newNotes);
+  noteOrder = entries.map(entry => entry.id);
+  return entries;
+}
+
+function noteListRowMarkup(note, { inGroup = false } = {}) {
+  const excerpt = notePlainText(note.content) || '空白文档';
+  const title = note.title || '无标题文档';
+  return `<div class="note-list-row${inGroup ? ' in-group' : ''}" data-note-row-id="${escapeHTML(note.id)}"><button class="note-list-item ${note.id === activeNoteId ? 'active' : ''}" type="button" role="option" aria-selected="${note.id === activeNoteId}" data-note-id="${escapeHTML(note.id)}"><strong>${escapeHTML(title)}</strong><p>${escapeHTML(excerpt)}</p><span>${formatNoteTime(note.updatedAt)}</span></button><button class="note-list-delete" type="button" data-note-delete-id="${escapeHTML(note.id)}" aria-label="删除${escapeHTML(title)}" title="删除笔记">×</button></div>`;
+}
+
+function noteGroupMarkup(group) {
+  const members = group.noteIds.map(noteId => notes.find(note => note.id === noteId)).filter(Boolean);
+  const expanded = !group.collapsed;
+  const holdsActiveNote = members.some(note => note.id === activeNoteId);
+  return `<div class="note-group${expanded ? ' expanded' : ''}${holdsActiveNote ? ' holds-active' : ''}" data-note-group-row-id="${escapeHTML(group.id)}">
+    <div class="note-group-row">
+      <button class="note-group-item" type="button" data-note-group-toggle="${escapeHTML(group.id)}" aria-expanded="${expanded}" title="点击展开或折叠 · 双击改名">
+        <span class="note-group-caret" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7.5 5 5 5-5 5"></path></svg></span>
+        <span class="note-group-info"><strong>${escapeHTML(group.name)}</strong><small>${members.length} 篇笔记</small></span>
+      </button>
+      <button class="note-group-ungroup" type="button" data-note-group-ungroup="${escapeHTML(group.id)}" aria-label="解散分组${escapeHTML(group.name)}" title="解散分组">⤺</button>
+    </div>
+    <div class="note-group-children" role="group" aria-label="${escapeHTML(group.name)}"${expanded ? '' : ' hidden'}>${members.map(note => noteListRowMarkup(note, { inGroup: true })).join('')}</div>
+  </div>`;
+}
+
+function renderNoteList() {
+  $('#notesList').innerHTML = noteListEntries().map(entry => entry.type === 'group'
+    ? noteGroupMarkup(findNoteGroup(entry.id))
+    : noteListRowMarkup(notes.find(note => note.id === entry.id))).join('');
 }
 
 function noteHeadings() {
@@ -4088,8 +4184,10 @@ function createNote() {
   const now = Date.now();
   const note = { id: `note-${now}-${Math.random().toString(36).slice(2, 7)}`, title: '无标题文档', content: '', createdAt: now, updatedAt: now, sharing: { enabled: false, permission: 'view', token: '' } };
   notes.unshift(note);
+  noteOrder.unshift(note.id);
   activeNoteId = note.id;
   persistNotes();
+  persistNoteStructure();
   loadActiveNote({ focusTitle: true });
 }
 
@@ -4097,6 +4195,8 @@ function deleteNoteById(noteId) {
   const index = notes.findIndex(note => note.id === noteId);
   if (index < 0) return;
   const previousActiveNoteId = activeNoteId;
+  const previousGroups = structuredClone(noteGroups);
+  const previousOrder = [...noteOrder];
   const [removedNote] = notes.splice(index, 1);
   const removedActiveNote = noteId === activeNoteId;
   if (!notes.length) {
@@ -4104,7 +4204,10 @@ function deleteNoteById(noteId) {
     notes.push({ id: `note-${now}-${Math.random().toString(36).slice(2, 7)}`, title: '无标题文档', content: '', createdAt: now, updatedAt: now });
   }
   if (removedActiveNote) activeNoteId = notes[Math.min(index, notes.length - 1)].id;
+  noteGroups.forEach(group => { group.noteIds = group.noteIds.filter(id => id !== noteId); });
+  noteOrder = noteOrder.filter(id => id !== noteId);
   persistNotes();
+  persistNoteStructure();
   if (removedActiveNote) loadActiveNote();
   else renderNoteList();
   showToast('笔记已删除', {
@@ -4113,7 +4216,10 @@ function deleteNoteById(noteId) {
     onAction: () => {
       notes.splice(Math.min(index, notes.length), 0, removedNote);
       activeNoteId = removedActiveNote ? removedNote.id : previousActiveNoteId;
+      noteGroups = previousGroups;
+      noteOrder = previousOrder;
       persistNotes();
+      persistNoteStructure();
       loadActiveNote();
       showToast('已撤销删除');
     }
@@ -4459,8 +4565,6 @@ function showToast(message, { duration = 1800, actionLabel, onAction } = {}) {
 
 function updateTime() {
   const now = new Date();
-  $('#clockHour').textContent = String(now.getHours()).padStart(2, '0');
-  $('#clockMinute').textContent = String(now.getMinutes()).padStart(2, '0');
   const hour = now.getHours();
   const period = hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
   if (period !== greetingPeriod) {
@@ -4999,10 +5103,31 @@ $('.workspace-nav').addEventListener('click', event => {
   if (button) switchWorkspaceView(button.dataset.workspaceView);
 });
 
+$('#brandHome').addEventListener('click', event => {
+  event.preventDefault();
+  switchWorkspaceView('bookmarks');
+  window.location.assign(new URL('/', window.location.origin).href);
+});
+
 $('#notesList').addEventListener('click', event => {
+  if (suppressNoteRowClick) {
+    event.preventDefault();
+    return;
+  }
   const deleteButton = event.target.closest('[data-note-delete-id]');
   if (deleteButton) {
     deleteNoteById(deleteButton.dataset.noteDeleteId);
+    return;
+  }
+  const ungroupButton = event.target.closest('[data-note-group-ungroup]');
+  if (ungroupButton) {
+    dissolveNoteGroup(ungroupButton.dataset.noteGroupUngroup);
+    return;
+  }
+  const groupToggle = event.target.closest('[data-note-group-toggle]');
+  if (groupToggle) {
+    const group = findNoteGroup(groupToggle.dataset.noteGroupToggle);
+    if (group && !groupToggle.querySelector('.note-group-rename')) setNoteGroupCollapsed(group, !group.collapsed);
     return;
   }
   const button = event.target.closest('[data-note-id]');
@@ -5014,6 +5139,306 @@ $('#notesList').addEventListener('click', event => {
   persistNotes();
   loadActiveNote();
 });
+
+function setNoteGroupCollapsed(group, collapsed) {
+  group.collapsed = Boolean(collapsed);
+  const row = $(`[data-note-group-row-id="${CSS.escape(group.id)}"]`);
+  row?.classList.toggle('expanded', !group.collapsed);
+  row?.querySelector('[data-note-group-toggle]')?.setAttribute('aria-expanded', String(!group.collapsed));
+  const children = row?.querySelector('.note-group-children');
+  if (children) children.hidden = group.collapsed;
+  persistNoteStructure();
+}
+
+function dissolveNoteGroup(groupId) {
+  const group = findNoteGroup(groupId);
+  if (!group) return;
+  const restoreGroups = structuredClone(noteGroups);
+  const restoreOrder = [...noteOrder];
+  const position = noteOrder.indexOf(group.id);
+  noteOrder.splice(position < 0 ? 0 : position, position < 0 ? 0 : 1, ...group.noteIds);
+  noteGroups = noteGroups.filter(entry => entry.id !== group.id);
+  persistNoteStructure();
+  renderNoteList();
+  showToast('分组已解散', {
+    duration: 6000,
+    actionLabel: '撤销',
+    onAction: () => {
+      noteGroups = restoreGroups;
+      noteOrder = restoreOrder;
+      persistNoteStructure();
+      renderNoteList();
+      showToast('已恢复分组');
+    }
+  });
+}
+
+function startNoteGroupRename(groupToggle) {
+  const group = findNoteGroup(groupToggle.dataset.noteGroupToggle);
+  const label = groupToggle.querySelector('.note-group-info strong');
+  if (!group || !label || label.querySelector('.note-group-rename')) return;
+
+  const input = document.createElement('input');
+  input.className = 'note-group-rename';
+  input.value = group.name;
+  input.maxLength = 24;
+  input.setAttribute('aria-label', '分组名称');
+  label.replaceChildren(input);
+  input.focus();
+  input.select();
+
+  let settled = false;
+  const settle = save => {
+    if (settled) return;
+    settled = true;
+    const nextName = input.value.replace(/\s+/g, ' ').trim().slice(0, 24);
+    if (save && nextName) {
+      group.name = nextName;
+      persistNoteStructure();
+    }
+    renderNoteList();
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); settle(true); }
+    if (event.key === 'Escape') { event.preventDefault(); settle(false); }
+  });
+  input.addEventListener('blur', () => settle(true));
+  ['click', 'dblclick', 'pointerdown'].forEach(type => input.addEventListener(type, event => event.stopPropagation()));
+}
+
+$('#notesList').addEventListener('dblclick', event => {
+  const groupToggle = event.target.closest('[data-note-group-toggle]');
+  if (groupToggle) startNoteGroupRename(groupToggle);
+});
+
+const notesListElement = $('#notesList');
+const noteGroupDwellDelay = 320;
+let noteRowDrag = null;
+let suppressNoteRowClick = false;
+
+function clearNoteDragTargets(dragState) {
+  clearTimeout(dragState.groupTimer);
+  dragState.groupTimer = null;
+  dragState.groupCandidate = null;
+  dragState.groupTarget?.classList.remove('note-group-drop-target');
+  dragState.groupTarget = null;
+  dragState.dropTarget?.classList.remove('note-drop-before', 'note-drop-after');
+  dragState.dropTarget = null;
+  dragState.dropTargetId = '';
+  dragState.dropAfter = false;
+}
+
+function noteDragTargetOf(event) {
+  const element = document.elementFromPoint(event.clientX, event.clientY);
+  const row = element?.closest?.('[data-note-row-id]');
+  if (row) return { element: row, type: 'note', id: row.dataset.noteRowId };
+  const groupRow = element?.closest?.('[data-note-group-row-id]');
+  if (!groupRow) return null;
+  // Only the group's own header acts as a target; its children are note rows.
+  if (!element?.closest?.('.note-group-row')) return null;
+  return { element: groupRow, type: 'group', id: groupRow.dataset.noteGroupRowId };
+}
+
+function scheduleNoteGroupTarget(dragState, target) {
+  if (dragState.groupCandidate === target.element) return;
+  clearTimeout(dragState.groupTimer);
+  dragState.groupCandidate = target.element;
+  dragState.groupTimer = setTimeout(() => {
+    if (noteRowDrag !== dragState || dragState.groupCandidate !== target.element) return;
+    dragState.dropTarget?.classList.remove('note-drop-before', 'note-drop-after');
+    dragState.dropTarget = null;
+    dragState.groupTarget = target.element;
+    target.element.classList.add('note-group-drop-target');
+  }, noteGroupDwellDelay);
+}
+
+function removeNoteFromStructure(noteId) {
+  noteGroups.forEach(group => { group.noteIds = group.noteIds.filter(id => id !== noteId); });
+  noteOrder = noteOrder.filter(id => id !== noteId);
+}
+
+function insertNoteBeside(draggedId, target, placeAfter) {
+  const targetGroup = target.type === 'note' ? noteGroupOf(target.id) : null;
+  removeNoteFromStructure(draggedId);
+  if (targetGroup) {
+    const index = targetGroup.noteIds.indexOf(target.id);
+    targetGroup.noteIds.splice(index < 0 ? targetGroup.noteIds.length : index + (placeAfter ? 1 : 0), 0, draggedId);
+    return;
+  }
+  const index = noteOrder.indexOf(target.id);
+  noteOrder.splice(index < 0 ? noteOrder.length : index + (placeAfter ? 1 : 0), 0, draggedId);
+}
+
+function moveNoteGroupBeside(groupId, target, placeAfter) {
+  const anchorId = target.type === 'group' ? target.id : (noteGroupOf(target.id)?.id ?? target.id);
+  if (anchorId === groupId) return;
+  noteOrder = noteOrder.filter(id => id !== groupId);
+  const index = noteOrder.indexOf(anchorId);
+  noteOrder.splice(index < 0 ? noteOrder.length : index + (placeAfter ? 1 : 0), 0, groupId);
+}
+
+function groupNotesTogether(draggedId, target) {
+  if (target.type === 'group') {
+    const group = findNoteGroup(target.id);
+    if (!group || group.noteIds.includes(draggedId)) return null;
+    removeNoteFromStructure(draggedId);
+    group.noteIds.push(draggedId);
+    group.collapsed = false;
+    return 'extended';
+  }
+
+  const existingGroup = noteGroupOf(target.id);
+  if (existingGroup) {
+    if (existingGroup.noteIds.includes(draggedId)) return null;
+    removeNoteFromStructure(draggedId);
+    existingGroup.noteIds.splice(existingGroup.noteIds.indexOf(target.id) + 1, 0, draggedId);
+    return 'extended';
+  }
+
+  if (target.id === draggedId) return null;
+  removeNoteFromStructure(draggedId);
+  const position = noteOrder.indexOf(target.id);
+  noteGroups.push({
+    id: `note-group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: uniqueNoteGroupName('新分组'),
+    noteIds: [target.id, draggedId],
+    collapsed: false
+  });
+  const groupId = noteGroups.at(-1).id;
+  if (position < 0) noteOrder.unshift(groupId);
+  else noteOrder.splice(position, 1, groupId);
+  return 'created';
+}
+
+notesListElement.addEventListener('pointerdown', event => {
+  if (event.pointerType !== 'mouse' || event.button !== 0) return;
+  if (event.target.closest('[data-note-delete-id], [data-note-group-ungroup], .note-group-rename')) return;
+  const noteRow = event.target.closest('[data-note-row-id]');
+  const groupHeader = event.target.closest('.note-group-row');
+  const element = noteRow || groupHeader?.closest('[data-note-group-row-id]');
+  if (!element) return;
+  noteRowDrag = {
+    pointerId: event.pointerId,
+    element,
+    type: noteRow ? 'note' : 'group',
+    id: noteRow ? noteRow.dataset.noteRowId : element.dataset.noteGroupRowId,
+    startX: event.clientX,
+    startY: event.clientY,
+    moved: false,
+    groupTarget: null,
+    groupCandidate: null,
+    groupTimer: null,
+    dropTarget: null,
+    dropAfter: false
+  };
+});
+
+notesListElement.addEventListener('pointermove', event => {
+  const dragState = noteRowDrag;
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+  if (!dragState.moved && Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY) < 6) return;
+
+  if (!dragState.moved) {
+    dragState.moved = true;
+    suppressNoteRowClick = true;
+    notesListElement.setPointerCapture?.(event.pointerId);
+    document.body.classList.add('is-dragging-notes');
+    dragState.element.classList.add('note-row-dragging');
+  }
+  event.preventDefault();
+
+  const target = noteDragTargetOf(event);
+  if (!target || target.element === dragState.element || dragState.element.contains(target.element)) {
+    clearNoteDragTargets(dragState);
+    // Empty space below the rows moves the item back out to the list's top level.
+    const listRect = notesListElement.getBoundingClientRect();
+    dragState.dropAtEnd = event.clientX >= listRect.left && event.clientX <= listRect.right
+      && event.clientY >= listRect.top && event.clientY <= listRect.bottom;
+    notesListElement.classList.toggle('note-list-drop-end', dragState.dropAtEnd);
+    return;
+  }
+  dragState.dropAtEnd = false;
+  notesListElement.classList.remove('note-list-drop-end');
+
+  const rect = target.element.getBoundingClientRect();
+  const headerRect = target.type === 'group'
+    ? target.element.querySelector('.note-group-row').getBoundingClientRect()
+    : rect;
+  const center = headerRect.top + headerRect.height / 2;
+  const canGroup = dragState.type === 'note';
+  const inGroupZone = Math.abs(event.clientY - center) < headerRect.height * .3;
+
+  if (canGroup && inGroupZone) scheduleNoteGroupTarget(dragState, target);
+  else {
+    clearTimeout(dragState.groupTimer);
+    dragState.groupTimer = null;
+    dragState.groupCandidate = null;
+    dragState.groupTarget?.classList.remove('note-group-drop-target');
+    dragState.groupTarget = null;
+  }
+  if (dragState.groupTarget) return;
+
+  const placeAfter = event.clientY > center;
+  if (dragState.dropTarget !== target.element) dragState.dropTarget?.classList.remove('note-drop-before', 'note-drop-after');
+  dragState.dropTarget = target.element;
+  dragState.dropTargetType = target.type;
+  dragState.dropTargetId = target.id;
+  dragState.dropAfter = placeAfter;
+  target.element.classList.toggle('note-drop-before', !placeAfter);
+  target.element.classList.toggle('note-drop-after', placeAfter);
+});
+
+function finishNoteRowDrag(event) {
+  const dragState = noteRowDrag;
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+  noteRowDrag = null;
+  if (notesListElement.hasPointerCapture?.(dragState.pointerId)) notesListElement.releasePointerCapture(dragState.pointerId);
+  document.body.classList.remove('is-dragging-notes');
+  dragState.element.classList.remove('note-row-dragging');
+
+  const groupTargetId = dragState.groupTarget
+    ? (dragState.groupTarget.dataset.noteRowId || dragState.groupTarget.dataset.noteGroupRowId)
+    : '';
+  const groupTargetType = dragState.groupTarget?.dataset.noteRowId ? 'note' : 'group';
+  const drop = dragState.dropTarget?.isConnected
+    ? { type: dragState.dropTargetType, id: dragState.dropTargetId, after: dragState.dropAfter }
+    : null;
+  const dropAtEnd = Boolean(dragState.dropAtEnd);
+  clearNoteDragTargets(dragState);
+  notesListElement.classList.remove('note-list-drop-end');
+
+  if (!dragState.moved) {
+    setTimeout(() => { suppressNoteRowClick = false; }, 0);
+    return;
+  }
+
+  if (groupTargetId) {
+    const result = groupNotesTogether(dragState.id, { type: groupTargetType, id: groupTargetId });
+    if (result) {
+      persistNoteStructure();
+      renderNoteList();
+      showToast(result === 'created' ? '已创建分组，双击分组名可改名' : '已加入分组');
+    }
+  } else if (drop?.id) {
+    if (dragState.type === 'note') insertNoteBeside(dragState.id, drop, drop.after);
+    else moveNoteGroupBeside(dragState.id, drop, drop.after);
+    persistNoteStructure();
+    renderNoteList();
+    showToast('排序已保存');
+  } else if (dropAtEnd) {
+    const wasGrouped = dragState.type === 'note' && Boolean(noteGroupOf(dragState.id));
+    if (dragState.type === 'note') removeNoteFromStructure(dragState.id);
+    else noteOrder = noteOrder.filter(id => id !== dragState.id);
+    noteOrder.push(dragState.id);
+    persistNoteStructure();
+    renderNoteList();
+    showToast(wasGrouped ? '已移出分组' : '排序已保存');
+  }
+  setTimeout(() => { suppressNoteRowClick = false; }, 0);
+}
+
+notesListElement.addEventListener('pointerup', finishNoteRowDrag);
+notesListElement.addEventListener('pointercancel', finishNoteRowDrag);
 
 $('#newNote').addEventListener('click', createNote);
 $('#deleteNote').addEventListener('click', deleteActiveNote);
@@ -5757,12 +6182,21 @@ async function readGalleryImageFile(file) {
   return galleryBlobToDataUrl(compressed);
 }
 
-async function galleryItemFromDrop(dataTransfer) {
-  const imageFile = [...dataTransfer.files].find(file => file.type.startsWith('image/'));
-  if (imageFile) {
-    if (imageFile.size > 12 * 1024 * 1024) throw new Error('图片文件请控制在 12MB 以内');
-    const image = await readGalleryImageFile(imageFile);
-    return { image: await uploadCloudImage(image, imageFile.name || 'gallery-image'), title: galleryDropTitle(imageFile.name), source: '' };
+async function galleryItemsFromDrop(dataTransfer) {
+  const imageFiles = [...dataTransfer.files].filter(file => file.type.startsWith('image/'));
+  if (imageFiles.length) {
+    const oversizedFile = imageFiles.find(file => file.size > 12 * 1024 * 1024);
+    if (oversizedFile) throw new Error(`「${oversizedFile.name}」超过 12MB`);
+    const items = [];
+    for (const imageFile of imageFiles) {
+      const image = await readGalleryImageFile(imageFile);
+      items.push({
+        image: await uploadCloudImage(image, imageFile.name || 'gallery-image'),
+        title: galleryDropTitle(imageFile.name),
+        source: ''
+      });
+    }
+    return items;
   }
 
   const html = dataTransfer.getData('text/html');
@@ -5771,13 +6205,13 @@ async function galleryItemFromDrop(dataTransfer) {
     const image = parsed.querySelector('img');
     if (image?.src) {
       const sourceLink = image.closest('a')?.href || parsed.querySelector('a')?.href || '';
-      return { image: image.src, title: galleryDropTitle(image.src, image.alt || image.title || ''), source: sourceLink };
+      return [{ image: image.src, title: galleryDropTitle(image.src, image.alt || image.title || ''), source: sourceLink }];
     }
   }
 
   const uri = dataTransfer.getData('text/uri-list').split('\n').map(value => value.trim()).find(value => value && !value.startsWith('#'))
     || dataTransfer.getData('text/plain').trim();
-  if (/^https?:\/\//i.test(uri) || /^data:image\//i.test(uri)) return { image: uri, title: galleryDropTitle(uri), source: '' };
+  if (/^https?:\/\//i.test(uri) || /^data:image\//i.test(uri)) return [{ image: uri, title: galleryDropTitle(uri), source: '' }];
   throw new Error('没有识别到可收藏的图片');
 }
 
@@ -6214,24 +6648,26 @@ document.addEventListener('drop', async event => {
   galleryDragDepth = 0;
   $('#galleryView').classList.remove('is-drag-over');
   try {
-    const dropped = await galleryItemFromDrop(event.dataTransfer);
-    const item = {
-      id: `gallery-${Date.now()}`,
+    const droppedItems = await galleryItemsFromDrop(event.dataTransfer);
+    const board = currentGalleryBoard === '全部' ? '网页收藏' : currentGalleryBoard;
+    const timestamp = Date.now();
+    const items = droppedItems.map((dropped, index) => ({
+      id: `gallery-${timestamp}-${index}`,
       image: dropped.image,
       title: dropped.title,
-      board: currentGalleryBoard === '全部' ? '网页收藏' : currentGalleryBoard,
+      board,
       source: dropped.source
-    };
-    galleryItems.unshift(item);
-    currentGalleryBoard = item.board;
+    }));
+    galleryItems.unshift(...items);
+    currentGalleryBoard = board;
     currentGalleryMode = 'pins';
     try { store.set('mos-gallery-items', galleryItems); }
     catch {
-      galleryItems.shift();
+      galleryItems.splice(0, items.length);
       throw new Error('图片较大，浏览器本地空间不足');
     }
     renderGallery();
-    showToast(`已收藏到「${item.board}」`);
+    showToast(items.length > 1 ? `已将 ${items.length} 张图片收藏到「${board}」` : `已收藏到「${board}」`);
   } catch (error) {
     showToast(error.message || '图片收藏失败');
   }
@@ -6342,21 +6778,29 @@ $('#galleryAddForm').addEventListener('submit', event => {
 
 const searchDialog = $('#searchDialog');
 let searchCloseTimer = null;
+let searchFocusTimer = null;
+const hoverActionsEnabled = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 function openSearchDialog() {
   clearTimeout(searchCloseTimer);
+  clearTimeout(searchFocusTimer);
+  closeAccountMenu();
   searchDialog.classList.remove('is-closing');
-  if (!searchDialog.open) searchDialog.show();
+  const wasOpen = searchDialog.open;
+  if (!wasOpen) searchDialog.show();
   document.body.classList.add('search-expanded');
-  requestAnimationFrame(() => {
+  const focusDelay = wasOpen || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190;
+  searchFocusTimer = setTimeout(() => {
+    if (!searchDialog.open || searchDialog.classList.contains('is-closing')) return;
     $('#searchInput').focus();
     $('#searchInput').select();
-  });
+  }, focusDelay);
 }
 
 function closeSearchDialog() {
+  clearTimeout(searchFocusTimer);
   if (!searchDialog.open || searchDialog.classList.contains('is-closing')) return;
   searchDialog.classList.add('is-closing');
-  const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200;
+  const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 280;
   searchCloseTimer = setTimeout(() => {
     searchDialog.close();
     searchDialog.classList.remove('is-closing');
@@ -7005,8 +7449,23 @@ function readableAuthError(error) {
 }
 
 function closeAccountMenu() {
+  clearTimeout(accountHoverTimer);
   $('.account-control').classList.remove('is-open');
   $('#accountButton').setAttribute('aria-expanded', 'false');
+}
+
+let accountHoverTimer = null;
+function openAccountMenu() {
+  clearTimeout(accountHoverTimer);
+  closeSearchDialog();
+  renderAuthState();
+  $('.account-control').classList.add('is-open');
+  $('#accountButton').setAttribute('aria-expanded', 'true');
+}
+
+function scheduleAccountHoverClose() {
+  clearTimeout(accountHoverTimer);
+  accountHoverTimer = setTimeout(closeAccountMenu, 180);
 }
 
 function openAuthDialog() {
@@ -7020,12 +7479,15 @@ function openAuthDialog() {
 
 $('#accountButton').addEventListener('click', event => {
   event.stopPropagation();
-  renderAuthState();
   const control = $('.account-control');
   const open = !control.classList.contains('is-open');
-  control.classList.toggle('is-open', open);
-  $('#accountButton').setAttribute('aria-expanded', String(open));
+  if (open) openAccountMenu();
+  else closeAccountMenu();
 });
+if (hoverActionsEnabled) {
+  $('.account-control').addEventListener('pointerenter', openAccountMenu);
+  $('.account-control').addEventListener('pointerleave', scheduleAccountHoverClose);
+}
 $('#accountMenuLogin').addEventListener('click', () => {
   closeAccountMenu();
   openAuthDialog();

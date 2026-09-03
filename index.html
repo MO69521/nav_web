@@ -1,394 +1,523 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0d12" />
-    <meta name="description" content="MO'S SPACE — 为创意工作者打造的个人导航工作台" />
-    <title>MO'S SPACE · 个人导航</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <div id="splashCursorMount" aria-hidden="true"></div>
-    <div class="app-shell">
-      <main class="main-content">
-        <div class="aurora-top" id="auroraTop" aria-hidden="true"></div>
-        <header class="topbar">
-          <div class="topbar-left">
-            <a class="brand" href="#" aria-label="KDESIGN 首页">
-              <img class="brand-logo" src="/logo.svg" alt="KDESIGN" />
-            </a>
-            <nav class="workspace-nav" aria-label="空间导航" role="tablist">
-              <button class="active" type="button" role="tab" data-workspace-view="bookmarks" data-rolling-nav-label="书签" aria-selected="true">书签</button>
-              <button type="button" role="tab" data-workspace-view="gallery" data-rolling-nav-label="图库" aria-selected="false">图库</button>
-              <button type="button" role="tab" data-workspace-view="notes" data-rolling-nav-label="笔记" aria-selected="false">笔记</button>
-            </nav>
-          </div>
-          <div class="top-actions">
-            <button class="icon-btn search-trigger" id="openSearch" type="button" aria-label="打开搜索" title="搜索"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 3 3"></path></svg></button>
-            <div class="account-control">
-              <button class="avatar" id="accountButton" type="button" aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" title="账户与设置"><img class="avatar-image" id="avatarImage" alt="" hidden /><svg class="avatar-guest-icon" id="avatarGuestIcon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5.5 19c.7-3.3 3.1-5 6.5-5s5.8 1.7 6.5 5"></path></svg><span id="avatarText" hidden></span></button>
-              <div class="theme-popover" id="accountMenu" role="menu" aria-label="账户与设置">
-                <div class="account-menu-profile">
-                  <span class="account-menu-avatar" id="accountMenuAvatar"><img class="avatar-image" id="accountMenuAvatarImage" alt="" hidden /><span id="accountMenuAvatarText">MO</span></span>
-                  <span><strong id="accountMenuName">访客模式</strong><small id="accountMenuEmail">尚未登录</small></span>
-                </div>
-                <button class="account-menu-action primary" id="accountMenuLogin" type="button">登录 / 创建账号</button>
-                <button class="account-menu-action" id="accountMenuLogout" type="button" hidden>退出登录</button>
-                <span class="theme-popover-title">外观设置</span>
-                <div class="theme-options">
-                  <button type="button" data-theme="dark" aria-pressed="true"><i class="theme-preview dark"></i><span>深色</span></button>
-                  <button type="button" data-theme="light" aria-pressed="false"><i class="theme-preview light"></i><span>浅色</span></button>
-                </div>
-                <div class="theme-setting-row">
-                  <span><strong>鼠标效果</strong><small>移动时显示跟随效果</small></span>
-                  <button class="setting-switch" id="splashCursorToggle" type="button" role="switch" aria-checked="true" aria-label="关闭鼠标效果"><i></i></button>
-                </div>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0d12" />
+  <meta name="description" content="MO'S SPACE — 为创意工作者打造的个人导航工作台" />
+  <title>MO'S SPACE · 个人导航</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+  <div id="splashCursorMount" aria-hidden="true"></div>
+  <div class="app-shell">
+    <main class="main-content">
+      <div class="aurora-top" id="auroraTop" aria-hidden="true"></div>
+      <header class="topbar">
+        <div class="topbar-left">
+          <a class="brand" id="brandHome" href="/" aria-label="KDESIGN 首页">
+            <img class="brand-logo" src="/logo.svg" alt="KDESIGN" />
+          </a>
+          <nav class="workspace-nav" aria-label="空间导航" role="tablist">
+            <button class="active" type="button" role="tab" data-workspace-view="bookmarks" data-rolling-nav-label="书签"
+              aria-selected="true">书签</button>
+            <button type="button" role="tab" data-workspace-view="gallery" data-rolling-nav-label="图库"
+              aria-selected="false">图库</button>
+            <button type="button" role="tab" data-workspace-view="notes" data-rolling-nav-label="笔记"
+              aria-selected="false">笔记</button>
+          </nav>
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn search-trigger" id="openSearch" type="button" aria-label="打开搜索" title="搜索"><svg
+              viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5"></circle>
+              <path d="m16 16 3 3"></path>
+            </svg></button>
+          <div class="account-control">
+            <button class="avatar" id="accountButton" type="button" aria-label="打开账户菜单" aria-haspopup="menu"
+              aria-expanded="false" aria-controls="accountMenu" title="账户与设置"><img class="avatar-image" id="avatarImage"
+                alt="" hidden /><svg class="avatar-guest-icon" id="avatarGuestIcon" viewBox="0 0 24 24"
+                aria-hidden="true">
+                <circle cx="12" cy="8" r="3.5"></circle>
+                <path d="M5.5 19c.7-3.3 3.1-5 6.5-5s5.8 1.7 6.5 5"></path>
+              </svg><span id="avatarText" hidden></span></button>
+            <div class="theme-popover" id="accountMenu" role="menu" aria-label="账户与设置">
+              <div class="account-menu-profile">
+                <span class="account-menu-avatar" id="accountMenuAvatar"><img class="avatar-image"
+                    id="accountMenuAvatarImage" alt="" hidden /><span id="accountMenuAvatarText">MO</span></span>
+                <span><strong id="accountMenuName">访客模式</strong><small id="accountMenuEmail">尚未登录</small></span>
+              </div>
+              <button class="account-menu-action primary" id="accountMenuLogin" type="button">登录 / 创建账号</button>
+              <button class="account-menu-action" id="accountMenuLogout" type="button" hidden>退出登录</button>
+              <span class="theme-popover-title">外观设置</span>
+              <div class="theme-options">
+                <button type="button" data-theme="dark" aria-pressed="true"><i
+                    class="theme-preview dark"></i><span>深色</span></button>
+                <button type="button" data-theme="light" aria-pressed="false"><i
+                    class="theme-preview light"></i><span>浅色</span></button>
+              </div>
+              <div class="theme-setting-row">
+                <span><strong>鼠标效果</strong><small>移动时显示跟随效果</small></span>
+                <button class="setting-switch" id="splashCursorToggle" type="button" role="switch" aria-checked="true"
+                  aria-label="关闭鼠标效果"><i></i></button>
               </div>
             </div>
           </div>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="circular-gallery-mount" id="circularGalleryMount" aria-label="拖动浏览灵感图库"></div>
+        <div class="hero-copy">
+          <h1><span id="greeting" aria-live="polite">上午好</span>，开始创造吧<span class="headline-period">。</span></h1>
+          <p>把灵感、工具和常用站点，收进属于你的数字空间。</p>
+        </div>
+      </section>
+
+      <nav class="category-tabs" id="categoryTabs" aria-label="导航分类"></nav>
+
+      <section class="content-section" id="bookmarksView">
+        <div class="bookmark-drop-overlay" id="bookmarkDropOverlay" aria-hidden="true">
+          <div><span>＋</span><strong id="bookmarkDropTitle">拖到这里导入网站</strong><small>自动识别网址、名称与网站图标</small></div>
+        </div>
+        <div class="site-grid" id="siteGrid"></div>
+        <div class="empty-state" id="emptyState" hidden><span>◇</span>
+          <h3>这里还没有内容</h3>
+          <p>点击“新增网址”，建立你的第一条书签。</p>
+        </div>
+        <div class="bookmark-floating-actions" role="group" aria-label="书签快捷操作">
+          <button class="bookmark-floating-button" type="button" data-action="open-add">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"></path>
+            </svg>
+            <span>新增网址</span>
+          </button>
+          <button class="bookmark-floating-button" type="button" data-action="import-bookmarks"
+            aria-label="从 Chrome、Safari、Edge 或 Firefox 导入书签">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"></path>
+            </svg>
+            <span>导入书签</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="gallery-view" id="galleryView" hidden>
+        <div class="gallery-drop-overlay" id="galleryDropOverlay" aria-hidden="true">
+          <div><span>↓</span><strong>拖到这里收藏图片</strong><small>支持网页图片与本地图片文件</small></div>
+        </div>
+        <header class="gallery-profile">
+          <div class="gallery-profile-copy">
+            <h2>我的灵感图库</h2>
+            <div class="gallery-stats"><span><b id="galleryItemCount">0</b> 个灵感</span><span><b
+                  id="galleryBoardCount">0</b> 个收藏夹</span></div>
+          </div>
+          <button class="gallery-add-button" id="openGalleryAdd" type="button">＋ 收藏图片</button>
         </header>
-
-        <section class="hero">
-          <div class="circular-gallery-mount" id="circularGalleryMount" aria-label="拖动浏览灵感图库"></div>
-          <div class="hero-copy">
-            <span class="eyebrow"><i></i> YOUR DIGITAL WORKSPACE</span>
-            <h1><span id="greeting" aria-live="polite">上午好</span>，开始创造吧<span class="headline-period">。</span></h1>
-            <p>把灵感、工具和常用站点，收进属于你的数字空间。</p>
+        <div class="gallery-toolbar">
+          <div class="gallery-mode-tabs" role="tablist" aria-label="图库视图">
+            <button class="active" type="button" role="tab" data-gallery-mode="pins" aria-selected="true">灵感收藏</button>
+            <button type="button" role="tab" data-gallery-mode="boards" aria-selected="false">收藏夹</button>
           </div>
-          <div class="clock-card" aria-label="当前时间">
-            <div class="clock-display" id="clock">
-              <span id="clockHour">00</span>
-              <i class="clock-divider" aria-hidden="true"></i>
-              <span id="clockMinute">00</span>
+          <div class="gallery-board-filters" id="galleryBoardFilters"></div>
+          <div class="gallery-size-control" id="gallerySizeControl" aria-label="调节图库图片大小"></div>
+        </div>
+        <div class="gallery-masonry" id="galleryGrid"></div>
+        <div class="gallery-boards" id="galleryBoards" hidden></div>
+        <div class="gallery-empty-state" id="galleryEmptyState" hidden>
+          <span class="gallery-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16.5V4.5m0 0L7.5 9M12 4.5 16.5 9"></path><path d="M4 14.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5"></path></svg></span>
+          <h3>把图片拖到这里上传</h3>
+          <p>支持本地图片文件与网页图片，一次可拖入多张</p>
+          <small>也可以点击右上角「收藏图片」手动添加</small>
+        </div>
+      </section>
+
+      <section class="notes-view" id="notesView" hidden>
+        <div class="notes-shell">
+          <aside class="notes-sidebar" aria-label="笔记列表">
+            <header class="notes-sidebar-header">
+              <h2>我的笔记</h2>
+              <button class="notes-new-button" id="newNote" type="button" aria-label="新建笔记" title="新建笔记"><svg
+                  viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22Z">
+                  </path>
+                  <path d="M8 12H16M12 16V8"></path>
+                </svg></button>
+            </header>
+            <div class="notes-list" id="notesList" role="listbox" aria-label="文档列表"></div>
+          </aside>
+          <div class="note-column-resizer" data-note-resize="sidebar" role="separator" aria-orientation="vertical"
+            aria-label="调整笔记列表宽度"></div>
+          <aside class="note-outline" aria-label="文档快捷导航">
+            <button class="note-outline-collapse" id="toggleNoteOutline" type="button" aria-controls="noteOutlineList"
+              aria-expanded="true" aria-label="收起文档快捷导航" title="收起快捷导航">«</button>
+            <nav class="note-outline-list" id="noteOutlineList" aria-label="当前文档目录"></nav>
+          </aside>
+          <div class="note-column-resizer" data-note-resize="outline" role="separator" aria-orientation="vertical"
+            aria-label="调整快捷导航宽度"></div>
+          <article class="note-document" aria-label="笔记编辑器">
+            <header class="note-document-header">
+              <div class="note-document-title">
+                <div class="note-document-title-row">
+                  <button class="note-title-emoji-button" id="noteTitleEmojiButton" type="button"
+                    aria-label="添加标题 Emoji" aria-haspopup="menu" aria-expanded="false">☺</button>
+                  <input class="note-title-input" id="noteTitle" maxlength="80" placeholder="无标题文档" aria-label="笔记标题" />
+                </div>
+                <div class="note-title-emoji-menu" id="noteTitleEmojiMenu" role="menu" aria-label="选择标题 Emoji" hidden>
+                </div>
+                <div class="note-save-meta">
+                  <span class="note-save-status" id="noteSaveStatus" role="status">最近保存：--</span>
+                  <button class="note-cloud-sync-status offline" id="noteCloudSyncStatus" type="button"
+                    aria-live="polite" title="点击登录后开启云端同步">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M6.1 15.2h8.2a3.25 3.25 0 0 0 .45-6.47A5.15 5.15 0 0 0 5 7.25a4 4 0 0 0 1.1 7.95Z">
+                      </path>
+                      <path class="note-cloud-check" d="m7.6 11.2 1.55 1.55 3.3-3.35"></path>
+                    </svg>
+                    <span id="noteCloudSyncLabel">未登录 · 仅本机保存</span>
+                  </button>
+                </div>
+              </div>
+              <div class="note-document-actions">
+                <button class="note-share-button" id="openNoteShare" type="button" aria-haspopup="dialog"
+                  aria-controls="noteSharePanel"><svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="15" cy="4" r="2.2"></circle>
+                    <circle cx="5" cy="10" r="2.2"></circle>
+                    <circle cx="15" cy="16" r="2.2"></circle>
+                    <path d="m7 9 6-4M7 11l6 4"></path>
+                  </svg><span>分享</span></button>
+                <button class="note-image-button" id="insertNoteImage" type="button" hidden>插入图片</button>
+                <input id="noteImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+                <button class="note-delete-button" id="deleteNote" type="button" hidden>删除</button>
+              </div>
+            </header>
+            <div class="note-editor" id="noteEditor" contenteditable="true" spellcheck="true" role="textbox"
+              aria-multiline="true" aria-label="笔记正文" data-placeholder="从这里开始写下想法…"></div>
+            <button class="note-block-drag-handle" id="noteBlockDragHandle" type="button" aria-label="拖动调整内容块顺序"
+              title="拖动排序" hidden>⣿</button>
+            <div class="note-drop-indicator" id="noteDropIndicator" aria-hidden="true" hidden></div>
+            <div class="note-marquee-box" id="noteMarqueeBox" aria-hidden="true" hidden></div>
+            <div class="note-selection-bubble" id="noteSelectionBubble" role="toolbar" aria-label="选中文字格式" hidden>
+              <div class="note-block-styles" aria-label="段落样式">
+                <button type="button" data-note-command="formatBlock" data-note-value="p">正文</button>
+                <button type="button" data-note-command="formatBlock" data-note-value="h1">H1</button>
+                <button type="button" data-note-command="formatBlock" data-note-value="h2">H2</button>
+                <button type="button" data-note-command="formatBlock" data-note-value="h3">H3</button>
+                <button type="button" data-note-command="formatBlock" data-note-value="h4">H4</button>
+                <button type="button" data-note-command="formatBlock" data-note-value="h5">H5</button>
+              </div>
+              <span></span>
+              <button type="button" data-note-command="bold" title="加粗" aria-label="加粗"><strong>B</strong></button>
+              <button type="button" data-note-command="italic" title="斜体" aria-label="斜体"><em>I</em></button>
+              <button type="button" data-note-command="underline" title="下划线" aria-label="下划线"><u>U</u></button>
+              <button type="button" data-note-command="strikeThrough" title="删除线" aria-label="删除线"><s>S</s></button>
+              <button type="button" data-note-command="createLink" title="添加链接" aria-label="添加链接">↗</button>
+              <button type="button" data-note-command="formatBlock" data-note-value="blockquote" title="引用"
+                aria-label="引用">“</button>
+              <button type="button" data-note-command="formatBlock" data-note-value="pre" title="代码块" aria-label="代码块">{
+                }</button>
+              <button type="button" data-note-command="callout" title="高亮块" aria-label="高亮块">💡</button>
+              <button type="button" data-note-command="insertHorizontalRule" title="分割线" aria-label="分割线">—</button>
+              <button type="button" id="bubbleInsertNoteImage" title="插入图片" aria-label="插入图片">▧</button>
+              <button type="button" id="noteLineSpacingButton" title="调整行间距" aria-label="调整行间距">↕</button>
+              <span></span>
+              <button type="button" data-note-command="insertUnorderedList" title="无序列表" aria-label="无序列表">•≡</button>
+              <button type="button" data-note-command="insertOrderedList" title="有序列表" aria-label="有序列表">1≡</button>
             </div>
-            <small><span>UTC+08</span><span>SHANGHAI</span><b>ONLINE</b></small>
-          </div>
-        </section>
-
-        <nav class="category-tabs" id="categoryTabs" aria-label="导航分类"></nav>
-
-        <section class="content-section" id="bookmarksView">
-          <div class="bookmark-drop-overlay" id="bookmarkDropOverlay" aria-hidden="true">
-            <div><span>＋</span><strong id="bookmarkDropTitle">拖到这里导入网站</strong><small>自动识别网址、名称与网站图标</small></div>
-          </div>
-          <div class="site-grid" id="siteGrid"></div>
-          <div class="empty-state" id="emptyState" hidden><span>◇</span><h3>这里还没有内容</h3><p>点击“新增网址”，建立你的第一条书签。</p></div>
-        </section>
-
-        <section class="gallery-view" id="galleryView" hidden>
-          <div class="gallery-drop-overlay" id="galleryDropOverlay" aria-hidden="true"><div><span>↓</span><strong>拖到这里收藏图片</strong><small>支持网页图片与本地图片文件</small></div></div>
-          <header class="gallery-profile">
-            <div class="gallery-profile-copy">
-              <h2>我的灵感图库</h2>
-              <div class="gallery-stats"><span><b id="galleryItemCount">0</b> 个灵感</span><span><b id="galleryBoardCount">0</b> 个收藏夹</span></div>
+            <div class="note-line-spacing-menu" id="noteLineSpacingMenu" role="menu" aria-label="行间距" hidden>
+              <button type="button" data-note-line-spacing="compact"><span>紧凑</span><small>1.4</small></button>
+              <button type="button" data-note-line-spacing="normal"><span>标准</span><small>1.7</small></button>
+              <button type="button" data-note-line-spacing="relaxed"><span>宽松</span><small>2.0</small></button>
+              <button type="button" data-note-line-spacing="loose"><span>舒展</span><small>2.4</small></button>
             </div>
-            <button class="gallery-add-button" id="openGalleryAdd" type="button">＋ 收藏图片</button>
-          </header>
-          <div class="gallery-toolbar">
-            <div class="gallery-mode-tabs" role="tablist" aria-label="图库视图">
-              <button class="active" type="button" role="tab" data-gallery-mode="pins" aria-selected="true">灵感收藏</button>
-              <button type="button" role="tab" data-gallery-mode="boards" aria-selected="false">收藏夹</button>
+            <div class="note-table-tools" id="noteTableTools" role="toolbar" aria-label="表格操作" hidden>
+              <strong class="note-table-selection-summary" id="noteTableSelectionSummary">1 个单元格</strong>
+              <span></span>
+              <button type="button" data-note-table-action="select-row">选择行</button>
+              <button type="button" data-note-table-action="select-column">选择列</button>
+              <button type="button" data-note-table-action="merge-cells">合并单元格</button>
+              <button type="button" data-note-table-action="split-cells">拆分</button>
+              <button type="button" data-note-table-action="equalize-columns">均分列宽</button>
+              <button type="button" data-note-table-action="equalize-rows">均分行高</button>
+              <button type="button" data-note-table-action="toggle-row-header" aria-pressed="false">固定行头</button>
+              <button type="button" data-note-table-action="toggle-column-header" aria-pressed="false">固定列头</button>
+              <span></span>
+              <button type="button" data-note-table-action="add-row-above">上方＋行</button>
+              <button type="button" data-note-table-action="add-row-below">下方＋行</button>
+              <button type="button" data-note-table-action="add-column-left">左侧＋列</button>
+              <button type="button" data-note-table-action="add-column-right">右侧＋列</button>
+              <span></span>
+              <button type="button" data-note-table-action="delete-row">删除当前行</button>
+              <button type="button" data-note-table-action="delete-column">删除当前列</button>
+              <button class="danger" type="button" data-note-table-action="delete-table">删除表格</button>
             </div>
-            <div class="gallery-board-filters" id="galleryBoardFilters"></div>
-            <div class="gallery-size-control" id="gallerySizeControl" aria-label="调节图库图片大小"></div>
-          </div>
-          <div class="gallery-masonry" id="galleryGrid"></div>
-          <div class="gallery-boards" id="galleryBoards" hidden></div>
-          <div class="gallery-empty-state" id="galleryEmptyState" hidden><span>▧</span><h3>还没有收藏</h3><p>点击“收藏图片”建立你的第一条视觉灵感。</p></div>
-        </section>
+            <button class="note-table-handle" id="noteTableHandle" type="button" aria-label="选择整个表格" title="选择整个表格"
+              hidden>▦</button>
+            <button class="note-table-axis-handle note-table-row-handle" id="noteTableRowHandle" type="button"
+              aria-label="选择当前行" title="选择当前行" hidden></button>
+            <button class="note-table-axis-handle note-table-column-handle" id="noteTableColumnHandle" type="button"
+              aria-label="选择当前列" title="选择当前列" hidden></button>
+            <button class="note-table-insert-handle row" id="noteTableInsertRowHandle" type="button"
+              aria-label="在这里增加一行" title="增加一行" hidden>＋</button>
+            <button class="note-table-insert-handle column" id="noteTableInsertColumnHandle" type="button"
+              aria-label="在这里增加一列" title="增加一列" hidden>＋</button>
+            <button class="note-table-content-drag-handle" id="noteTableContentDragHandle" type="button"
+              aria-label="拖动交换单元格内容" title="拖动交换单元格内容" hidden><span>⠿</span></button>
+            <div class="note-table-drop-indicator" id="noteTableDropIndicator" aria-hidden="true" hidden></div>
+            <div class="note-table-resize-guide" id="noteTableResizeGuide" aria-hidden="true" hidden></div>
+            <div class="note-table-drag-ghost" id="noteTableDragGhost" aria-hidden="true" hidden></div>
+            <div class="note-table-content-drag-ghost" id="noteTableContentDragGhost" aria-hidden="true" hidden></div>
+            <div class="note-table-picker" id="noteTablePicker" role="region" aria-label="在文档画布上拖动选择表格尺寸"
+              contenteditable="false" hidden>
+              <div class="note-table-picker-title"><strong>在画布上拖出表格</strong><span id="noteTablePickerSize">3 × 3</span>
+              </div>
+              <div class="note-table-picker-grid" id="noteTablePickerGrid" aria-label="按住并拖动选择行列数"></div>
+              <small>在网格上按住并拖动，松开后直接插入 · ESC 取消</small>
+            </div>
+            <div class="note-slash-menu" id="noteSlashMenu" role="listbox" aria-label="插入内容" hidden>
+              <div class="note-slash-menu-header"><span>/</span><strong id="noteSlashQuery">快捷插入</strong><kbd>ESC</kbd>
+              </div>
+              <div class="note-slash-menu-list" id="noteSlashMenuList"></div>
+            </div>
+            <div class="note-callout-emoji-menu" id="noteCalloutEmojiMenu" role="menu" aria-label="更换高亮块 Emoji" hidden>
+            </div>
+            <div class="note-heading-tools" id="noteHeadingTools" aria-label="标题快捷设置" hidden>
+              <button class="note-heading-collapse" id="noteHeadingCollapse" type="button" title="折叠标题内容"
+                aria-label="折叠标题内容">▾</button>
+              <button class="note-heading-level" id="noteHeadingLevel" type="button" aria-haspopup="true"
+                aria-expanded="false">H1</button>
+              <div class="note-heading-level-menu" id="noteHeadingLevelMenu" role="menu" aria-label="修改标题级别" hidden>
+                <button type="button" data-note-heading-level="h1">H1</button>
+                <button type="button" data-note-heading-level="h2">H2</button>
+                <button type="button" data-note-heading-level="h3">H3</button>
+                <button type="button" data-note-heading-level="h4">H4</button>
+                <button type="button" data-note-heading-level="h5">H5</button>
+              </div>
+            </div>
+          </article>
+          <button class="note-share-backdrop" id="noteShareBackdrop" type="button" aria-label="关闭分享设置" hidden></button>
+          <aside class="note-share-panel" id="noteSharePanel" role="dialog" aria-modal="true"
+            aria-labelledby="noteShareTitle" hidden>
+            <header class="note-share-header">
+              <div><span>文档分享</span>
+                <h3 id="noteShareTitle">分享“欢迎使用笔记”</h3>
+              </div>
+              <button id="closeNoteShare" type="button" aria-label="关闭分享设置">×</button>
+            </header>
+            <section class="note-share-section">
+              <div class="note-share-switch-row">
+                <span><strong>链接分享</strong><small id="noteShareSwitchHint">开启后，获得链接的人可访问</small></span>
+                <button class="note-share-switch" id="noteShareEnabled" type="button" role="switch"
+                  aria-checked="false"><i></i></button>
+              </div>
+            </section>
+            <section class="note-share-section note-share-permission-section" id="noteSharePermissionSection"
+              aria-disabled="true">
+              <span class="note-share-label">访问权限</span>
+              <div class="note-permission-options" role="radiogroup" aria-label="文档访问权限">
+                <button type="button" role="radio" data-note-permission="view" aria-checked="true"><svg
+                    viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M2.5 10s2.8-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.8 4.5-7.5 4.5S2.5 10 2.5 10Z"></path>
+                    <circle cx="10" cy="10" r="2"></circle>
+                  </svg><span><strong>可查看</strong><small>仅能阅读文档内容</small></span><i></i></button>
+                <button type="button" role="radio" data-note-permission="edit" aria-checked="false"><svg
+                    viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="m4 13.5-.5 3 3-.5 8.8-8.8-2.5-2.5L4 13.5Z"></path>
+                    <path d="m11.8 5.7 2.5 2.5"></path>
+                  </svg><span><strong>可编辑</strong><small>可阅读并修改文档</small></span><i></i></button>
+              </div>
+            </section>
+            <section class="note-share-section note-share-link-section" id="noteShareLinkSection" aria-disabled="true">
+              <label for="noteShareLink">分享链接</label>
+              <div class="note-share-link-row"><input id="noteShareLink" type="text" readonly /><button
+                  id="copyNoteShareLink" type="button">复制链接</button></div>
+              <p id="noteShareSummary">链接分享已关闭</p>
+            </section>
+          </aside>
+        </div>
+      </section>
 
-        <section class="notes-view" id="notesView" hidden>
-          <div class="notes-shell">
-            <aside class="notes-sidebar" aria-label="笔记列表">
-              <header class="notes-sidebar-header">
-                <h2>我的笔记</h2>
-                <button class="notes-new-button" id="newNote" type="button" aria-label="新建笔记" title="新建笔记"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22Z"></path><path d="M8 12H16M12 16V8"></path></svg></button>
-              </header>
-              <div class="notes-list" id="notesList" role="listbox" aria-label="文档列表"></div>
-            </aside>
-            <div class="note-column-resizer" data-note-resize="sidebar" role="separator" aria-orientation="vertical" aria-label="调整笔记列表宽度"></div>
-            <aside class="note-outline" aria-label="文档快捷导航">
-              <button class="note-outline-collapse" id="toggleNoteOutline" type="button" aria-controls="noteOutlineList" aria-expanded="true" aria-label="收起文档快捷导航" title="收起快捷导航">«</button>
-              <nav class="note-outline-list" id="noteOutlineList" aria-label="当前文档目录"></nav>
-            </aside>
-            <div class="note-column-resizer" data-note-resize="outline" role="separator" aria-orientation="vertical" aria-label="调整快捷导航宽度"></div>
-            <article class="note-document" aria-label="笔记编辑器">
-              <header class="note-document-header">
-                <div class="note-document-title">
-                  <div class="note-document-title-row">
-                    <button class="note-title-emoji-button" id="noteTitleEmojiButton" type="button" aria-label="添加标题 Emoji" aria-haspopup="menu" aria-expanded="false">☺</button>
-                    <input class="note-title-input" id="noteTitle" maxlength="80" placeholder="无标题文档" aria-label="笔记标题" />
-                  </div>
-                  <div class="note-title-emoji-menu" id="noteTitleEmojiMenu" role="menu" aria-label="选择标题 Emoji" hidden></div>
-                  <div class="note-save-meta">
-                    <span class="note-save-status" id="noteSaveStatus" role="status">最近保存：--</span>
-                    <button class="note-cloud-sync-status offline" id="noteCloudSyncStatus" type="button" aria-live="polite" title="点击登录后开启云端同步">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.1 15.2h8.2a3.25 3.25 0 0 0 .45-6.47A5.15 5.15 0 0 0 5 7.25a4 4 0 0 0 1.1 7.95Z"></path><path class="note-cloud-check" d="m7.6 11.2 1.55 1.55 3.3-3.35"></path></svg>
-                      <span id="noteCloudSyncLabel">未登录 · 仅本机保存</span>
-                    </button>
-                  </div>
-                </div>
-                <div class="note-document-actions">
-                  <button class="note-share-button" id="openNoteShare" type="button" aria-haspopup="dialog" aria-controls="noteSharePanel"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="15" cy="4" r="2.2"></circle><circle cx="5" cy="10" r="2.2"></circle><circle cx="15" cy="16" r="2.2"></circle><path d="m7 9 6-4M7 11l6 4"></path></svg><span>分享</span></button>
-                  <button class="note-image-button" id="insertNoteImage" type="button" hidden>插入图片</button>
-                  <input id="noteImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-                  <button class="note-delete-button" id="deleteNote" type="button" hidden>删除</button>
-                </div>
-              </header>
-              <div class="note-editor" id="noteEditor" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="笔记正文" data-placeholder="从这里开始写下想法…"></div>
-              <button class="note-block-drag-handle" id="noteBlockDragHandle" type="button" aria-label="拖动调整内容块顺序" title="拖动排序" hidden>⣿</button>
-              <div class="note-drop-indicator" id="noteDropIndicator" aria-hidden="true" hidden></div>
-              <div class="note-marquee-box" id="noteMarqueeBox" aria-hidden="true" hidden></div>
-              <div class="note-selection-bubble" id="noteSelectionBubble" role="toolbar" aria-label="选中文字格式" hidden>
-                <div class="note-block-styles" aria-label="段落样式">
-                  <button type="button" data-note-command="formatBlock" data-note-value="p">正文</button>
-                  <button type="button" data-note-command="formatBlock" data-note-value="h1">H1</button>
-                  <button type="button" data-note-command="formatBlock" data-note-value="h2">H2</button>
-                  <button type="button" data-note-command="formatBlock" data-note-value="h3">H3</button>
-                  <button type="button" data-note-command="formatBlock" data-note-value="h4">H4</button>
-                  <button type="button" data-note-command="formatBlock" data-note-value="h5">H5</button>
-                </div>
-                <span></span>
-                <button type="button" data-note-command="bold" title="加粗" aria-label="加粗"><strong>B</strong></button>
-                <button type="button" data-note-command="italic" title="斜体" aria-label="斜体"><em>I</em></button>
-                <button type="button" data-note-command="underline" title="下划线" aria-label="下划线"><u>U</u></button>
-                <button type="button" data-note-command="strikeThrough" title="删除线" aria-label="删除线"><s>S</s></button>
-                <button type="button" data-note-command="createLink" title="添加链接" aria-label="添加链接">↗</button>
-                <button type="button" data-note-command="formatBlock" data-note-value="blockquote" title="引用" aria-label="引用">“</button>
-                <button type="button" data-note-command="formatBlock" data-note-value="pre" title="代码块" aria-label="代码块">{ }</button>
-                <button type="button" data-note-command="callout" title="高亮块" aria-label="高亮块">💡</button>
-                <button type="button" data-note-command="insertHorizontalRule" title="分割线" aria-label="分割线">—</button>
-                <button type="button" id="bubbleInsertNoteImage" title="插入图片" aria-label="插入图片">▧</button>
-                <button type="button" id="noteLineSpacingButton" title="调整行间距" aria-label="调整行间距">↕</button>
-                <span></span>
-                <button type="button" data-note-command="insertUnorderedList" title="无序列表" aria-label="无序列表">•≡</button>
-                <button type="button" data-note-command="insertOrderedList" title="有序列表" aria-label="有序列表">1≡</button>
-              </div>
-              <div class="note-line-spacing-menu" id="noteLineSpacingMenu" role="menu" aria-label="行间距" hidden>
-                <button type="button" data-note-line-spacing="compact"><span>紧凑</span><small>1.4</small></button>
-                <button type="button" data-note-line-spacing="normal"><span>标准</span><small>1.7</small></button>
-                <button type="button" data-note-line-spacing="relaxed"><span>宽松</span><small>2.0</small></button>
-                <button type="button" data-note-line-spacing="loose"><span>舒展</span><small>2.4</small></button>
-              </div>
-              <div class="note-table-tools" id="noteTableTools" role="toolbar" aria-label="表格操作" hidden>
-                <strong class="note-table-selection-summary" id="noteTableSelectionSummary">1 个单元格</strong>
-                <span></span>
-                <button type="button" data-note-table-action="select-row">选择行</button>
-                <button type="button" data-note-table-action="select-column">选择列</button>
-                <button type="button" data-note-table-action="merge-cells">合并单元格</button>
-                <button type="button" data-note-table-action="split-cells">拆分</button>
-                <button type="button" data-note-table-action="equalize-columns">均分列宽</button>
-                <button type="button" data-note-table-action="equalize-rows">均分行高</button>
-                <button type="button" data-note-table-action="toggle-row-header" aria-pressed="false">固定行头</button>
-                <button type="button" data-note-table-action="toggle-column-header" aria-pressed="false">固定列头</button>
-                <span></span>
-                <button type="button" data-note-table-action="add-row-above">上方＋行</button>
-                <button type="button" data-note-table-action="add-row-below">下方＋行</button>
-                <button type="button" data-note-table-action="add-column-left">左侧＋列</button>
-                <button type="button" data-note-table-action="add-column-right">右侧＋列</button>
-                <span></span>
-                <button type="button" data-note-table-action="delete-row">删除当前行</button>
-                <button type="button" data-note-table-action="delete-column">删除当前列</button>
-                <button class="danger" type="button" data-note-table-action="delete-table">删除表格</button>
-              </div>
-              <button class="note-table-handle" id="noteTableHandle" type="button" aria-label="选择整个表格" title="选择整个表格" hidden>▦</button>
-              <button class="note-table-axis-handle note-table-row-handle" id="noteTableRowHandle" type="button" aria-label="选择当前行" title="选择当前行" hidden></button>
-              <button class="note-table-axis-handle note-table-column-handle" id="noteTableColumnHandle" type="button" aria-label="选择当前列" title="选择当前列" hidden></button>
-              <button class="note-table-insert-handle row" id="noteTableInsertRowHandle" type="button" aria-label="在这里增加一行" title="增加一行" hidden>＋</button>
-              <button class="note-table-insert-handle column" id="noteTableInsertColumnHandle" type="button" aria-label="在这里增加一列" title="增加一列" hidden>＋</button>
-              <button class="note-table-content-drag-handle" id="noteTableContentDragHandle" type="button" aria-label="拖动交换单元格内容" title="拖动交换单元格内容" hidden><span>⠿</span></button>
-              <div class="note-table-drop-indicator" id="noteTableDropIndicator" aria-hidden="true" hidden></div>
-              <div class="note-table-resize-guide" id="noteTableResizeGuide" aria-hidden="true" hidden></div>
-              <div class="note-table-drag-ghost" id="noteTableDragGhost" aria-hidden="true" hidden></div>
-              <div class="note-table-content-drag-ghost" id="noteTableContentDragGhost" aria-hidden="true" hidden></div>
-              <div class="note-table-picker" id="noteTablePicker" role="region" aria-label="在文档画布上拖动选择表格尺寸" contenteditable="false" hidden>
-                <div class="note-table-picker-title"><strong>在画布上拖出表格</strong><span id="noteTablePickerSize">3 × 3</span></div>
-                <div class="note-table-picker-grid" id="noteTablePickerGrid" aria-label="按住并拖动选择行列数"></div>
-                <small>在网格上按住并拖动，松开后直接插入 · ESC 取消</small>
-              </div>
-              <div class="note-slash-menu" id="noteSlashMenu" role="listbox" aria-label="插入内容" hidden>
-                <div class="note-slash-menu-header"><span>/</span><strong id="noteSlashQuery">快捷插入</strong><kbd>ESC</kbd></div>
-                <div class="note-slash-menu-list" id="noteSlashMenuList"></div>
-              </div>
-              <div class="note-callout-emoji-menu" id="noteCalloutEmojiMenu" role="menu" aria-label="更换高亮块 Emoji" hidden></div>
-              <div class="note-heading-tools" id="noteHeadingTools" aria-label="标题快捷设置" hidden>
-                <button class="note-heading-collapse" id="noteHeadingCollapse" type="button" title="折叠标题内容" aria-label="折叠标题内容">▾</button>
-                <button class="note-heading-level" id="noteHeadingLevel" type="button" aria-haspopup="true" aria-expanded="false">H1</button>
-                <div class="note-heading-level-menu" id="noteHeadingLevelMenu" role="menu" aria-label="修改标题级别" hidden>
-                  <button type="button" data-note-heading-level="h1">H1</button>
-                  <button type="button" data-note-heading-level="h2">H2</button>
-                  <button type="button" data-note-heading-level="h3">H3</button>
-                  <button type="button" data-note-heading-level="h4">H4</button>
-                  <button type="button" data-note-heading-level="h5">H5</button>
-                </div>
-              </div>
-            </article>
-            <button class="note-share-backdrop" id="noteShareBackdrop" type="button" aria-label="关闭分享设置" hidden></button>
-            <aside class="note-share-panel" id="noteSharePanel" role="dialog" aria-modal="true" aria-labelledby="noteShareTitle" hidden>
-              <header class="note-share-header">
-                <div><span>文档分享</span><h3 id="noteShareTitle">分享“欢迎使用笔记”</h3></div>
-                <button id="closeNoteShare" type="button" aria-label="关闭分享设置">×</button>
-              </header>
-              <section class="note-share-section">
-                <div class="note-share-switch-row">
-                  <span><strong>链接分享</strong><small id="noteShareSwitchHint">开启后，获得链接的人可访问</small></span>
-                  <button class="note-share-switch" id="noteShareEnabled" type="button" role="switch" aria-checked="false"><i></i></button>
-                </div>
-              </section>
-              <section class="note-share-section note-share-permission-section" id="noteSharePermissionSection" aria-disabled="true">
-                <span class="note-share-label">访问权限</span>
-                <div class="note-permission-options" role="radiogroup" aria-label="文档访问权限">
-                  <button type="button" role="radio" data-note-permission="view" aria-checked="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.8-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.8 4.5-7.5 4.5S2.5 10 2.5 10Z"></path><circle cx="10" cy="10" r="2"></circle></svg><span><strong>可查看</strong><small>仅能阅读文档内容</small></span><i></i></button>
-                  <button type="button" role="radio" data-note-permission="edit" aria-checked="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 13.5-.5 3 3-.5 8.8-8.8-2.5-2.5L4 13.5Z"></path><path d="m11.8 5.7 2.5 2.5"></path></svg><span><strong>可编辑</strong><small>可阅读并修改文档</small></span><i></i></button>
-                </div>
-              </section>
-              <section class="note-share-section note-share-link-section" id="noteShareLinkSection" aria-disabled="true">
-                <label for="noteShareLink">分享链接</label>
-                <div class="note-share-link-row"><input id="noteShareLink" type="text" readonly /><button id="copyNoteShareLink" type="button">复制链接</button></div>
-                <p id="noteShareSummary">链接分享已关闭</p>
-              </section>
-            </aside>
-          </div>
-        </section>
+      <footer><span>MO'S SPACE © 2026</span><span>Designed for focus &amp; flow.</span></footer>
+    </main>
+  </div>
 
-        <footer><span>MO'S SPACE © 2026</span><span>Designed for focus &amp; flow.</span></footer>
-      </main>
+  <dialog id="searchDialog" class="search-dialog" aria-label="搜索">
+    <div class="search-dialog-content">
+      <button class="search-dialog-close" id="closeSearch" type="button" aria-label="关闭搜索">×</button>
+      <section class="search-section">
+        <form class="search-box" id="searchForm">
+          <div class="engine-select">
+            <button type="button" id="engineButton"><span id="engineIcon">G</span><span
+                id="engineName">Google</span><span class="chevron">⌄</span></button>
+            <div class="engine-menu" id="engineMenu" hidden></div>
+          </div>
+          <span class="search-divider"></span>
+          <input id="searchInput" autocomplete="off" placeholder="搜索整个互联网" />
+          <button class="search-submit" aria-label="搜索" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5"></circle>
+              <path d="m16 16 4 4"></path>
+            </svg></button>
+        </form>
+        <div class="quick-searches">
+          <span>快速搜索</span>
+          <button data-query="今日设计趋势">设计趋势</button>
+          <button data-query="AI 产品灵感">AI 灵感</button>
+          <button data-query="前端开发资源">开发资源</button>
+        </div>
+      </section>
     </div>
+  </dialog>
 
-    <dialog id="searchDialog" class="search-dialog" aria-label="搜索">
-      <div class="search-dialog-content">
-        <button class="search-dialog-close" id="closeSearch" type="button" aria-label="关闭搜索">×</button>
-        <section class="search-section">
-          <form class="search-box" id="searchForm">
-            <div class="engine-select">
-              <button type="button" id="engineButton"><span id="engineIcon">G</span><span id="engineName">Google</span><span class="chevron">⌄</span></button>
-              <div class="engine-menu" id="engineMenu" hidden></div>
-            </div>
-            <span class="search-divider"></span>
-            <input id="searchInput" autocomplete="off" placeholder="搜索整个互联网，或输入网址…" />
-            <kbd>/</kbd>
-            <button class="search-submit" aria-label="搜索" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button>
-          </form>
-          <div class="quick-searches">
-            <span>快速搜索</span>
-            <button data-query="今日设计趋势">设计趋势</button>
-            <button data-query="AI 产品灵感">AI 灵感</button>
-            <button data-query="前端开发资源">开发资源</button>
-          </div>
-        </section>
+  <dialog id="addDialog">
+    <form method="dialog" id="addForm">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">NEW SHORTCUT</span>
+          <h2>添加到我的空间</h2>
+        </div><button type="button" id="closeDialog" aria-label="关闭">×</button>
       </div>
-    </dialog>
+      <label>网站名称<input name="name" required maxlength="24" placeholder="例如：我的作品集" /></label>
+      <label>网站地址<input name="url" required type="url" placeholder="https://example.com" /></label>
+      <label>分类<select name="category"></select></label>
+      <div class="dialog-actions"><button type="button" id="cancelAdd" class="secondary">取消</button><button
+          value="default" class="primary" id="confirmAdd">添加网址</button></div>
+    </form>
+  </dialog>
 
-    <dialog id="addDialog">
-      <form method="dialog" id="addForm">
-        <div class="dialog-heading"><div><span class="section-kicker">NEW SHORTCUT</span><h2>添加到我的空间</h2></div><button type="button" id="closeDialog" aria-label="关闭">×</button></div>
-        <label>网站名称<input name="name" required maxlength="24" placeholder="例如：我的作品集" /></label>
-        <label>网站地址<input name="url" required type="url" placeholder="https://example.com" /></label>
-        <label>分类<select name="category"></select></label>
-        <div class="dialog-actions"><button type="button" id="cancelAdd" class="secondary">取消</button><button value="default" class="primary" id="confirmAdd">添加网址</button></div>
-      </form>
-    </dialog>
-
-    <dialog id="bookmarkImportDialog" class="bookmark-import-dialog" aria-labelledby="bookmarkImportTitle">
-      <form method="dialog" id="bookmarkImportForm">
-        <div class="bookmark-import-heading">
-          <h2 id="bookmarkImportTitle">导入浏览器书签</h2>
-          <p>只读扫描这台 Mac 上的浏览器用户，书签数据不会上传。</p>
-        </div>
-        <div class="bookmark-import-browsers" aria-label="支持的浏览器">
-          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/chrome/chrome.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Chrome</span>
-          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/safari/safari.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Safari</span>
-          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/edge/edge.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Edge</span>
-          <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/firefox/firefox.svg" alt="" aria-hidden="true" referrerpolicy="no-referrer" />Firefox</span>
-        </div>
-        <button class="bookmark-local-scan" id="scanLocalBookmarks" type="button"><span>⌕</span><strong>扫描本机浏览器</strong><small>检测用户与书签数量，不会自动导入</small></button>
-        <section class="bookmark-local-results" id="bookmarkLocalResults" aria-live="polite" hidden>
-          <div class="bookmark-local-status" id="bookmarkLocalStatus"></div>
-          <div class="bookmark-local-profiles" id="bookmarkLocalProfiles"></div>
-          <button class="bookmark-local-confirm" id="importLocalBookmarks" type="button" disabled>导入选中书签</button>
-        </section>
-        <div class="bookmark-import-divider"><span>或使用导出文件</span></div>
-        <button class="bookmark-import-picker" id="chooseBookmarkFile" type="button"><span>↓</span><strong>选择书签 HTML 文件</strong><small>保留文件夹并自动跳过重复网址</small></button>
-        <input id="bookmarkImportInput" type="file" accept=".html,.htm,text/html" hidden />
-        <div class="dialog-actions"><button type="button" id="cancelBookmarkImport" class="secondary">取消</button></div>
-      </form>
-    </dialog>
-
-    <dialog id="categoryDialog">
-      <form method="dialog" id="categoryForm">
-        <div class="dialog-heading"><div><span class="section-kicker">NEW CATEGORY</span><h2>新建导航分类</h2></div><button type="button" id="closeCategoryDialog" aria-label="关闭">×</button></div>
-        <label>分类名称<input name="categoryName" required maxlength="12" placeholder="例如：摄影灵感" /></label>
-        <div class="dialog-actions"><button type="button" id="cancelCategory" class="secondary">取消</button><button type="button" class="primary" id="confirmCategory">创建分类</button></div>
-      </form>
-    </dialog>
-
-    <dialog id="galleryAddDialog" class="gallery-add-dialog">
-      <form id="galleryAddForm">
-        <div class="dialog-heading"><div><span class="section-kicker">SAVE INSPIRATION</span><h2>收藏图片</h2></div><button type="button" id="closeGalleryAdd" aria-label="关闭">×</button></div>
-        <label>图片地址<input name="image" required type="url" placeholder="https://example.com/image.jpg" /></label>
-        <label>标题<input name="title" required maxlength="36" placeholder="为这份灵感起个名字" /></label>
-        <label>收藏夹<input name="board" required maxlength="16" list="galleryBoardSuggestions" placeholder="例如：界面设计" /><datalist id="galleryBoardSuggestions"></datalist></label>
-        <label>来源链接（选填）<input name="source" type="url" placeholder="https://example.com" /></label>
-        <div class="dialog-actions"><button type="button" id="cancelGalleryAdd" class="secondary">取消</button><button type="submit" class="primary">保存到图库</button></div>
-      </form>
-    </dialog>
-
-    <dialog id="galleryLightbox" class="gallery-lightbox" aria-label="图片全屏预览">
-      <button class="gallery-lightbox-close" id="closeGalleryLightbox" type="button" aria-label="关闭预览">×</button>
-      <button class="gallery-lightbox-nav gallery-lightbox-prev" id="galleryLightboxPrev" type="button" aria-label="上一张">‹</button>
-      <figure class="gallery-lightbox-figure">
-        <img id="galleryLightboxImage" alt="" />
-        <figcaption><div><strong id="galleryLightboxTitle"></strong><span id="galleryLightboxBoard"></span></div><a id="galleryLightboxSource" target="_blank" rel="noreferrer">查看来源 ↗</a></figcaption>
-      </figure>
-      <button class="gallery-lightbox-nav gallery-lightbox-next" id="galleryLightboxNext" type="button" aria-label="下一张">›</button>
-    </dialog>
-
-    <dialog id="noteImagePreview" class="note-image-preview" aria-label="文档图片预览">
-      <figure class="note-image-preview-figure">
-        <img id="noteImagePreviewSource" alt="" />
-        <figcaption id="noteImagePreviewCaption" hidden></figcaption>
-      </figure>
-      <span class="note-image-preview-hint">点击图片查看原始尺寸 · 点击背景或按 Esc 关闭</span>
-    </dialog>
-
-    <dialog id="groupDialog" class="group-dialog">
-      <div class="group-dialog-content" tabindex="-1">
-        <div class="dialog-heading">
-          <button type="button" id="groupBackButton" class="group-back-button" aria-label="返回上一级" hidden>←</button>
-          <div><input id="groupNameInput" aria-label="分组名称" maxlength="12" /></div>
-          <button type="button" id="closeGroupDialog" aria-label="关闭">×</button>
-        </div>
-        <div class="group-dialog-sites" id="groupDialogSites"></div>
-        <div class="dialog-actions"><button type="button" id="ungroupSites" class="secondary">解散分组</button><button type="button" id="finishGroup" class="primary">完成</button></div>
+  <dialog id="bookmarkImportDialog" class="bookmark-import-dialog" aria-labelledby="bookmarkImportTitle">
+    <form method="dialog" id="bookmarkImportForm">
+      <div class="bookmark-import-heading">
+        <h2 id="bookmarkImportTitle">导入浏览器书签</h2>
+        <p>只读扫描这台 Mac 上的浏览器用户，书签数据不会上传。</p>
       </div>
-    </dialog>
+      <div class="bookmark-import-browsers" aria-label="支持的浏览器">
+        <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/chrome/chrome.svg" alt=""
+            aria-hidden="true" referrerpolicy="no-referrer" />Chrome</span>
+        <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/safari/safari.svg" alt=""
+            aria-hidden="true" referrerpolicy="no-referrer" />Safari</span>
+        <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/edge/edge.svg" alt=""
+            aria-hidden="true" referrerpolicy="no-referrer" />Edge</span>
+        <span><img src="https://raw.githubusercontent.com/alrra/browser-logos/main/src/firefox/firefox.svg" alt=""
+            aria-hidden="true" referrerpolicy="no-referrer" />Firefox</span>
+      </div>
+      <button class="bookmark-local-scan" id="scanLocalBookmarks"
+        type="button"><span>⌕</span><strong>扫描本机浏览器</strong><small>检测用户与书签数量，不会自动导入</small></button>
+      <section class="bookmark-local-results" id="bookmarkLocalResults" aria-live="polite" hidden>
+        <div class="bookmark-local-status" id="bookmarkLocalStatus"></div>
+        <div class="bookmark-local-profiles" id="bookmarkLocalProfiles"></div>
+        <button class="bookmark-local-confirm" id="importLocalBookmarks" type="button" disabled>导入选中书签</button>
+      </section>
+      <div class="bookmark-import-divider"><span>或使用导出文件</span></div>
+      <button class="bookmark-import-picker" id="chooseBookmarkFile" type="button"><span>↓</span><strong>选择书签 HTML
+          文件</strong><small>保留文件夹并自动跳过重复网址</small></button>
+      <input id="bookmarkImportInput" type="file" accept=".html,.htm,text/html" hidden />
+      <div class="dialog-actions"><button type="button" id="cancelBookmarkImport" class="secondary">取消</button></div>
+    </form>
+  </dialog>
 
-    <dialog id="authDialog" class="auth-dialog">
-      <form id="authForm">
-        <div class="dialog-heading"><div><span class="section-kicker">PERSONAL ACCOUNT</span><h2 id="authTitle">邮箱验证码登录</h2></div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button></div>
-        <div id="authGuestView">
-          <p class="auth-intro" id="authIntro">输入邮箱获取验证码，新用户会自动创建账号。</p>
-          <label id="authEmailLabel">邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username" placeholder="you@example.com" /></label>
-          <label id="authPasswordLabel" hidden>密码<input id="authPassword" name="password" type="password" minlength="8" autocomplete="current-password" /></label>
-          <label id="authCodeLabel" hidden>邮箱验证码<input id="authCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" minlength="6" maxlength="8" placeholder="输入邮件中的验证码" /></label>
-          <div class="auth-help"><button type="button" id="authForgotPassword" hidden>忘记密码？</button></div>
-          <p class="auth-message" id="authMessage" role="status"></p>
-          <button class="auth-submit" id="authSubmit" type="submit">发送验证码</button>
-        </div>
-        <div class="auth-user-view" id="authUserView" hidden>
-          <span class="auth-user-avatar" id="authUserAvatar"><img class="avatar-image" id="authUserAvatarImage" alt="" hidden /><span id="authUserAvatarText">MO</span></span>
-          <strong id="authUserEmail"></strong>
-          <p>当前邮箱账号已登录。</p>
-          <button class="auth-logout" id="authLogout" type="button">退出登录</button>
-        </div>
-      </form>
-    </dialog>
+  <dialog id="categoryDialog">
+    <form method="dialog" id="categoryForm">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">NEW CATEGORY</span>
+          <h2>新建导航分类</h2>
+        </div><button type="button" id="closeCategoryDialog" aria-label="关闭">×</button>
+      </div>
+      <label>分类名称<input name="categoryName" required maxlength="12" placeholder="例如：摄影灵感" /></label>
+      <div class="dialog-actions"><button type="button" id="cancelCategory" class="secondary">取消</button><button
+          type="button" class="primary" id="confirmCategory">创建分类</button></div>
+    </form>
+  </dialog>
 
-    <div class="toast" id="toast" role="status"></div>
-    <script type="module" src="/main.js"></script>
-  </body>
+  <dialog id="galleryAddDialog" class="gallery-add-dialog">
+    <form id="galleryAddForm">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">SAVE INSPIRATION</span>
+          <h2>收藏图片</h2>
+        </div><button type="button" id="closeGalleryAdd" aria-label="关闭">×</button>
+      </div>
+      <label>图片地址<input name="image" required type="url" placeholder="https://example.com/image.jpg" /></label>
+      <label>标题<input name="title" required maxlength="36" placeholder="为这份灵感起个名字" /></label>
+      <label>收藏夹<input name="board" required maxlength="16" list="galleryBoardSuggestions"
+          placeholder="例如：界面设计" /><datalist id="galleryBoardSuggestions"></datalist></label>
+      <label>来源链接（选填）<input name="source" type="url" placeholder="https://example.com" /></label>
+      <div class="dialog-actions"><button type="button" id="cancelGalleryAdd" class="secondary">取消</button><button
+          type="submit" class="primary">保存到图库</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="galleryLightbox" class="gallery-lightbox" aria-label="图片全屏预览">
+    <button class="gallery-lightbox-close" id="closeGalleryLightbox" type="button" aria-label="关闭预览">×</button>
+    <button class="gallery-lightbox-nav gallery-lightbox-prev" id="galleryLightboxPrev" type="button"
+      aria-label="上一张">‹</button>
+    <figure class="gallery-lightbox-figure">
+      <img id="galleryLightboxImage" alt="" />
+      <figcaption>
+        <div><strong id="galleryLightboxTitle"></strong><span id="galleryLightboxBoard"></span></div><a
+          id="galleryLightboxSource" target="_blank" rel="noreferrer">查看来源 ↗</a>
+      </figcaption>
+    </figure>
+    <button class="gallery-lightbox-nav gallery-lightbox-next" id="galleryLightboxNext" type="button"
+      aria-label="下一张">›</button>
+  </dialog>
+
+  <dialog id="noteImagePreview" class="note-image-preview" aria-label="文档图片预览">
+    <figure class="note-image-preview-figure">
+      <img id="noteImagePreviewSource" alt="" />
+      <figcaption id="noteImagePreviewCaption" hidden></figcaption>
+    </figure>
+    <span class="note-image-preview-hint">点击图片查看原始尺寸 · 点击背景或按 Esc 关闭</span>
+  </dialog>
+
+  <dialog id="groupDialog" class="group-dialog">
+    <div class="group-dialog-content" tabindex="-1">
+      <div class="dialog-heading">
+        <button type="button" id="groupBackButton" class="group-back-button" aria-label="返回上一级" hidden>←</button>
+        <div><input id="groupNameInput" aria-label="分组名称" maxlength="12" /></div>
+        <button type="button" id="closeGroupDialog" aria-label="关闭">×</button>
+      </div>
+      <div class="group-dialog-sites" id="groupDialogSites"></div>
+      <div class="dialog-actions"><button type="button" id="ungroupSites" class="secondary">解散分组</button><button
+          type="button" id="finishGroup" class="primary">完成</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="authDialog" class="auth-dialog">
+    <form id="authForm">
+      <div class="dialog-heading">
+        <div><span class="section-kicker">PERSONAL ACCOUNT</span>
+          <h2 id="authTitle">邮箱验证码登录</h2>
+        </div><button type="button" id="closeAuthDialog" aria-label="关闭">×</button>
+      </div>
+      <div id="authGuestView">
+        <p class="auth-intro" id="authIntro">输入邮箱获取验证码，新用户会自动创建账号。</p>
+        <label id="authEmailLabel">邮箱地址<input id="authEmail" name="email" required type="email" autocomplete="username"
+            placeholder="you@example.com" /></label>
+        <label id="authPasswordLabel" hidden>密码<input id="authPassword" name="password" type="password" minlength="8"
+            autocomplete="current-password" /></label>
+        <label id="authCodeLabel" hidden>邮箱验证码<input id="authCode" name="code" type="text" inputmode="numeric"
+            autocomplete="one-time-code" minlength="6" maxlength="8" placeholder="输入邮件中的验证码" /></label>
+        <div class="auth-help"><button type="button" id="authForgotPassword" hidden>忘记密码？</button></div>
+        <p class="auth-message" id="authMessage" role="status"></p>
+        <button class="auth-submit" id="authSubmit" type="submit">发送验证码</button>
+      </div>
+      <div class="auth-user-view" id="authUserView" hidden>
+        <span class="auth-user-avatar" id="authUserAvatar"><img class="avatar-image" id="authUserAvatarImage" alt=""
+            hidden /><span id="authUserAvatarText">MO</span></span>
+        <strong id="authUserEmail"></strong>
+        <p>当前邮箱账号已登录。</p>
+        <button class="auth-logout" id="authLogout" type="button">退出登录</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="/main.js"></script>
+</body>
+
 </html>

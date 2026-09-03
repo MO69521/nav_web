@@ -121,6 +121,7 @@ const BUTTON_COMPONENT_EXCLUSIONS = [
   '.search-submit',
   '.avatar',
   '.setting-switch',
+  '.bookmark-floating-button',
   '.add-site-card',
   '.more-btn',
   '.delete-btn',
@@ -128,6 +129,8 @@ const BUTTON_COMPONENT_EXCLUSIONS = [
   '.gallery-pin-remove',
   '.gallery-board-card',
   '.note-list-item',
+  '.note-group-item',
+  '.note-group-ungroup',
   '.note-outline-collapse',
   '.note-title-emoji-button',
   '.note-cloud-sync-status',
@@ -161,9 +164,13 @@ function buttonVariant(element) {
 function applyButtonComponent(element) {
   if (!isButtonComponent(element)) return false;
   const variant = buttonVariant(element);
-  element.classList.add('app-button');
-  element.classList.toggle('app-button-primary', variant === 'primary');
-  element.classList.toggle('app-button-danger', variant === 'danger');
+  if (!element.classList.contains('app-button')) element.classList.add('app-button');
+  if (element.classList.contains('app-button-primary') !== (variant === 'primary')) {
+    element.classList.toggle('app-button-primary', variant === 'primary');
+  }
+  if (element.classList.contains('app-button-danger') !== (variant === 'danger')) {
+    element.classList.toggle('app-button-danger', variant === 'danger');
+  }
   return true;
 }
 
@@ -221,7 +228,12 @@ export function createButtonSystem(root = document, options = {}) {
       if (record.type === 'attributes') reconcile(record.target);
     });
   });
-  observer.observe(root, { attributes: true, attributeFilter: ['class', 'hidden', 'style'], childList: true, subtree: true });
+  observer.observe(root, {
+    attributes: true,
+    attributeFilter: ['class', 'role', 'data-button', 'data-specular-outline'],
+    childList: true,
+    subtree: true
+  });
 
   return () => {
     observer.disconnect();
