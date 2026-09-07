@@ -673,6 +673,7 @@ function renderGallery() {
     <div class="gallery-pin-media">
       <button class="gallery-pin-preview" type="button" data-gallery-preview="${item.id}" aria-label="全屏查看 ${escapeHTML(item.title)}"><img src="${escapeHTML(item.image)}" alt="${escapeHTML(item.title)}" loading="lazy" draggable="false" /></button>
       <a class="gallery-pin-open" href="${escapeHTML(item.source || item.image)}" target="_blank" rel="noreferrer" aria-label="查看 ${escapeHTML(item.title)}">查看来源</a>
+      <button class="gallery-pin-copy" type="button" data-gallery-copy="${item.id}" aria-label="复制 ${escapeHTML(item.title)}">复制</button>
       <button class="gallery-pin-remove" type="button" data-gallery-remove="${item.id}" aria-label="移除 ${escapeHTML(item.title)}">×</button>
     </div>
     <div class="gallery-pin-meta"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.board)}</span></div>
@@ -6182,8 +6183,8 @@ async function readGalleryImageFile(file) {
   return galleryBlobToDataUrl(compressed);
 }
 
-async function galleryItemsFromDrop(dataTransfer) {
-  const imageFiles = [...dataTransfer.files].filter(file => file.type.startsWith('image/'));
+async function galleryItemsFromFiles(files) {
+  const imageFiles = [...files].filter(file => file.type.startsWith('image/'));
   if (imageFiles.length) {
     const oversizedFile = imageFiles.find(file => file.size > 12 * 1024 * 1024);
     if (oversizedFile) throw new Error(`「${oversizedFile.name}」超过 12MB`);
@@ -6198,6 +6199,12 @@ async function galleryItemsFromDrop(dataTransfer) {
     }
     return items;
   }
+  throw new Error('请选择图片文件');
+}
+
+async function galleryItemsFromDrop(dataTransfer) {
+  const imageFiles = [...dataTransfer.files].filter(file => file.type.startsWith('image/'));
+  if (imageFiles.length) return galleryItemsFromFiles(imageFiles);
 
   const html = dataTransfer.getData('text/html');
   if (html) {
@@ -6213,6 +6220,95 @@ async function galleryItemsFromDrop(dataTransfer) {
     || dataTransfer.getData('text/plain').trim();
   if (/^https?:\/\//i.test(uri) || /^data:image\//i.test(uri)) return [{ image: uri, title: galleryDropTitle(uri), source: '' }];
   throw new Error('没有识别到可收藏的图片');
+}
+
+function galleryTargetBoard() {
+  return currentGalleryBoard === '全部' ? '网页收藏' : currentGalleryBoard;
+}
+
+function addGalleryItems(newItems) {
+  if (!newItems.length) throw new Error('没有识别到可收藏的图片');
+  const board = galleryTargetBoard();
+  const timestamp = Date.now();
+  const items = newItems.map((item, index) => ({
+    id: `gallery-${timestamp}-${index}`,
+    image: item.image,
+    title: item.title,
+    board,
+    source: item.source || ''
+  }));
+  galleryItems.unshift(...items);
+  currentGalleryBoard = board;
+  currentGalleryMode = 'pins';
+  try { store.set('mos-gallery-items', galleryItems); }
+  catch {
+    galleryItems.splice(0, items.length);
+    throw new Error('图片较大，浏览器本地空间不足');
+  }
+  renderGallery();
+  showToast(items.length > 1 ? `已将 ${items.length} 张图片收藏到「${board}」` : `已收藏到「${board}」`);
+}
+
+function galleryClipboardContainsImage(clipboardData) {
+  if ([...(clipboardData?.files || [])].some(file => file.type.startsWith('image/'))) return true;
+  const html = clipboardData?.getData('text/html') || '';
+  if (html && new DOMParser().parseFromString(html, 'text/html').querySelector('img')) return true;
+  const text = clipboardData?.getData('text/uri-list') || clipboardData?.getData('text/plain') || '';
+  return /^(https?:\/\/|data:image\/)/i.test(text.trim());
+}
+
+async function pasteGalleryFromSystemClipboard() {
+  if (!navigator.clipboard?.read) throw new Error('请直接按 ⌘V 粘贴图片');
+  const clipboardItems = await navigator.clipboard.read();
+  const imageFiles = [];
+  for (const item of clipboardItems) {
+    const imageType = item.types.find(type => type.startsWith('image/'));
+    if (!imageType) continue;
+    const blob = await item.getType(imageType);
+    imageFiles.push(new File([blob], `粘贴图片.${imageType.split('/')[1] || 'png'}`, { type: imageType }));
+  }
+  if (imageFiles.length) {
+    addGalleryItems(await galleryItemsFromFiles(imageFiles));
+    return;
+  }
+  const text = (await navigator.clipboard.readText()).trim();
+  if (/^(https?:\/\/|data:image\/)/i.test(text)) {
+    addGalleryItems([{ image: text, title: galleryDropTitle(text), source: '' }]);
+    return;
+  }
+  throw new Error('剪贴板里没有可粘贴的图片');
+}
+
+async function galleryImageBlobAsPng(blob) {
+  if (blob.type === 'image/png') return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!png) throw new Error('图片转换失败');
+  return png;
+}
+
+async function copyGalleryItem(item) {
+  if (!item) return;
+  try {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('image_clipboard_unavailable');
+    const response = await fetch(item.image);
+    if (!response.ok) throw new Error('image_fetch_failed');
+    const png = await galleryImageBlobAsPng(await response.blob());
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+    showToast('图片已复制');
+  } catch {
+    try {
+      await navigator.clipboard.writeText(item.image);
+      showToast('图片地址已复制');
+    } catch {
+      showToast('浏览器未允许访问剪贴板');
+    }
+  }
 }
 
 function acceptsGalleryDrop(dataTransfer) {
@@ -6627,6 +6723,51 @@ document.addEventListener('drop', async event => {
 });
 
 let galleryDragDepth = 0;
+const galleryImageInput = $('#galleryImageInput');
+$('#uploadGalleryImage').addEventListener('click', () => galleryImageInput.click());
+galleryImageInput.addEventListener('change', async event => {
+  const files = [...event.target.files];
+  if (!files.length) return;
+  const button = $('#uploadGalleryImage');
+  button.disabled = true;
+  button.textContent = '处理中…';
+  try {
+    addGalleryItems(await galleryItemsFromFiles(files));
+  } catch (error) {
+    showToast(error.message || '图片上传失败');
+  } finally {
+    button.disabled = false;
+    button.textContent = '上传';
+    galleryImageInput.value = '';
+  }
+});
+
+$('#pasteGalleryImage').addEventListener('click', async () => {
+  const button = $('#pasteGalleryImage');
+  button.disabled = true;
+  button.textContent = '读取中…';
+  try {
+    await pasteGalleryFromSystemClipboard();
+  } catch (error) {
+    showToast(error.message || '图片粘贴失败');
+  } finally {
+    button.disabled = false;
+    button.textContent = '粘贴';
+  }
+});
+
+document.addEventListener('paste', async event => {
+  if (currentWorkspaceView !== 'gallery' || document.querySelector('dialog[open]')) return;
+  if (event.target.closest?.('input, textarea, [contenteditable="true"]')) return;
+  if (!galleryClipboardContainsImage(event.clipboardData)) return;
+  event.preventDefault();
+  try {
+    addGalleryItems(await galleryItemsFromDrop(event.clipboardData));
+  } catch (error) {
+    showToast(error.message || '图片粘贴失败');
+  }
+});
+
 document.addEventListener('dragenter', event => {
   if ($('#galleryView').hidden || document.querySelector('dialog[open]') || !acceptsGalleryDrop(event.dataTransfer)) return;
   event.preventDefault();
@@ -6648,26 +6789,7 @@ document.addEventListener('drop', async event => {
   galleryDragDepth = 0;
   $('#galleryView').classList.remove('is-drag-over');
   try {
-    const droppedItems = await galleryItemsFromDrop(event.dataTransfer);
-    const board = currentGalleryBoard === '全部' ? '网页收藏' : currentGalleryBoard;
-    const timestamp = Date.now();
-    const items = droppedItems.map((dropped, index) => ({
-      id: `gallery-${timestamp}-${index}`,
-      image: dropped.image,
-      title: dropped.title,
-      board,
-      source: dropped.source
-    }));
-    galleryItems.unshift(...items);
-    currentGalleryBoard = board;
-    currentGalleryMode = 'pins';
-    try { store.set('mos-gallery-items', galleryItems); }
-    catch {
-      galleryItems.splice(0, items.length);
-      throw new Error('图片较大，浏览器本地空间不足');
-    }
-    renderGallery();
-    showToast(items.length > 1 ? `已将 ${items.length} 张图片收藏到「${board}」` : `已收藏到「${board}」`);
+    addGalleryItems(await galleryItemsFromDrop(event.dataTransfer));
   } catch (error) {
     showToast(error.message || '图片收藏失败');
   }
@@ -6706,6 +6828,11 @@ $('#galleryGrid').addEventListener('click', event => {
     openGalleryLightbox(preview.dataset.galleryPreview);
     return;
   }
+  const copy = event.target.closest('[data-gallery-copy]');
+  if (copy) {
+    copyGalleryItem(galleryItems.find(item => item.id === copy.dataset.galleryCopy));
+    return;
+  }
   const remove = event.target.closest('[data-gallery-remove]');
   if (!remove) return;
   event.preventDefault();
@@ -6729,6 +6856,7 @@ $('#galleryGrid').addEventListener('click', event => {
 $('#closeGalleryLightbox').addEventListener('click', () => galleryLightbox.close());
 $('#galleryLightboxPrev').addEventListener('click', () => moveGalleryLightbox(-1));
 $('#galleryLightboxNext').addEventListener('click', () => moveGalleryLightbox(1));
+$('#galleryLightboxCopy').addEventListener('click', () => copyGalleryItem(galleryItems.find(item => item.id === activeGalleryItemId)));
 galleryLightbox.addEventListener('keydown', event => {
   if (event.key === 'ArrowLeft') { event.preventDefault(); moveGalleryLightbox(-1); }
   if (event.key === 'ArrowRight') { event.preventDefault(); moveGalleryLightbox(1); }
