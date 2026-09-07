@@ -5,6 +5,10 @@ export function createDragSortEffect({ container, itemSelector }) {
   let lastX = 0;
   let pointerX = 0;
   let pointerY = 0;
+  let pointerOffsetX = 0;
+  let pointerOffsetY = 0;
+  let ghostWidth = 0;
+  let ghostHeight = 0;
   let magnetTarget = null;
   let magnetStrength = 0;
 
@@ -14,15 +18,17 @@ export function createDragSortEffect({ container, itemSelector }) {
 
   function positionGhost() {
     if (!ghost) return;
-    let x = pointerX;
-    let y = pointerY;
+    let left = pointerX - pointerOffsetX;
+    let top = pointerY - pointerOffsetY;
     if (magnetTarget?.isConnected && magnetStrength > 0) {
       const rect = magnetTarget.getBoundingClientRect();
-      x += (rect.left + rect.width / 2 - x) * magnetStrength;
-      y += (rect.top + Math.min(52, rect.height / 2) - y) * magnetStrength;
+      const targetLeft = rect.left + (rect.width - ghostWidth) / 2;
+      const targetTop = rect.top + (rect.height - ghostHeight) / 2;
+      left += (targetLeft - left) * magnetStrength;
+      top += (targetTop - top) * magnetStrength;
     }
-    ghost.style.left = `${x - 56}px`;
-    ghost.style.top = `${y - 63}px`;
+    ghost.style.left = `${left}px`;
+    ghost.style.top = `${top}px`;
   }
 
   function move(event) {
@@ -41,8 +47,27 @@ export function createDragSortEffect({ container, itemSelector }) {
     positionGhost();
   }
 
+  function matchItemSize(item) {
+    if (!ghost || !item?.isConnected) return;
+    const rect = item.getBoundingClientRect();
+    const offsetRatioX = ghostWidth > 0 ? pointerOffsetX / ghostWidth : .5;
+    const offsetRatioY = ghostHeight > 0 ? pointerOffsetY / ghostHeight : .5;
+    ghostWidth = rect.width;
+    ghostHeight = rect.height;
+    pointerOffsetX = rect.width * offsetRatioX;
+    pointerOffsetY = rect.height * offsetRatioY;
+    ghost.style.setProperty('--sort-ghost-width', `${rect.width}px`);
+    ghost.style.setProperty('--sort-ghost-height', `${rect.height}px`);
+    positionGhost();
+  }
+
   function start(item, event) {
     source = item;
+    const sourceRect = item.getBoundingClientRect();
+    ghostWidth = sourceRect.width;
+    ghostHeight = sourceRect.height;
+    pointerOffsetX = Math.max(0, Math.min(sourceRect.width, event.clientX - sourceRect.left));
+    pointerOffsetY = Math.max(0, Math.min(sourceRect.height, event.clientY - sourceRect.top));
     ghost = item.cloneNode(true);
     ghost.removeAttribute('href');
     ghost.removeAttribute('data-id');
@@ -52,6 +77,8 @@ export function createDragSortEffect({ container, itemSelector }) {
     ghost.querySelector('.card-actions')?.remove();
     ghost.classList.remove('dragging', 'group-item-dragging', 'reflow-from', 'reflow-to', 'group-reflow-from', 'group-reflow-to', 'group-target', 'reorder-target', 'drop-after');
     ghost.classList.add('sort-drag-ghost');
+    ghost.style.setProperty('--sort-ghost-width', `${sourceRect.width}px`);
+    ghost.style.setProperty('--sort-ghost-height', `${sourceRect.height}px`);
     lastX = event.clientX;
     pointerX = event.clientX;
     pointerY = event.clientY;
@@ -105,6 +132,10 @@ export function createDragSortEffect({ container, itemSelector }) {
     const finishedGhost = ghost;
     source = null;
     ghost = null;
+    pointerOffsetX = 0;
+    pointerOffsetY = 0;
+    ghostWidth = 0;
+    ghostHeight = 0;
     magnetTarget = null;
     magnetStrength = 0;
     document.body.classList.remove('is-dragging-sites');
@@ -116,8 +147,9 @@ export function createDragSortEffect({ container, itemSelector }) {
     }
 
     const destination = finishedSource.getBoundingClientRect();
-    const finalLeft = destination.left + (destination.width - 112) / 2;
-    const finalTop = destination.top + (destination.height - 126) / 2;
+    const finishedRect = finishedGhost.getBoundingClientRect();
+    const finalLeft = destination.left + (destination.width - finishedRect.width) / 2;
+    const finalTop = destination.top + (destination.height - finishedRect.height) / 2;
     finishedGhost.style.transition = 'left 190ms cubic-bezier(.2,.8,.2,1), top 190ms cubic-bezier(.2,.8,.2,1), transform 190ms cubic-bezier(.2,.8,.2,1), opacity 190ms ease';
     requestAnimationFrame(() => {
       finishedGhost.style.left = `${finalLeft}px`;
@@ -136,5 +168,5 @@ export function createDragSortEffect({ container, itemSelector }) {
     if (ghost) portal.appendChild(ghost);
   }
 
-  return { start, move, setMagnetTarget, reflow, finish, movePortal, items };
+  return { start, move, setMagnetTarget, matchItemSize, reflow, finish, movePortal, items };
 }

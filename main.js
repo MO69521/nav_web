@@ -4876,6 +4876,8 @@ function scheduleGroupTarget(target, event) {
   pointerDrag.groupCandidate = target;
   pointerDrag.groupCandidateX = event.clientX;
   pointerDrag.groupCandidateY = event.clientY;
+  target.classList.add('group-candidate');
+  document.body.classList.add('bookmark-group-candidate');
   siteDragEffect.setMagnetTarget(null);
   pointerDrag.groupTimer = setTimeout(() => {
     if (!pointerDrag || pointerDrag.groupCandidate !== target) return;
@@ -4883,7 +4885,9 @@ function scheduleGroupTarget(target, event) {
     pointerDrag.reorderTarget = null;
     pointerDrag.groupTarget?.classList.remove('group-target');
     pointerDrag.groupTarget = target;
+    target.classList.remove('group-candidate');
     target.classList.add('group-target');
+    document.body.classList.remove('bookmark-group-candidate');
     document.body.classList.add('bookmark-group-ready');
     siteDragEffect.setMagnetTarget(target, .24);
   }, bookmarkGroupActivationDelay);
@@ -4957,10 +4961,8 @@ siteGrid.addEventListener('pointermove', event => {
   const canGroup = Boolean(pointerDrag.card.dataset.id || pointerDrag.card.dataset.groupId)
     && currentCategory === 'all'
     && !searchQuery.trim();
-  const inGroupZone = Boolean(target.dataset.groupId) || (
-    Math.abs(event.clientX - (rect.left + rect.width / 2)) < rect.width * .32 &&
-    Math.abs(event.clientY - (rect.top + rect.height / 2)) < rect.height * .38
-  );
+  const inGroupZone = event.clientX >= rect.left && event.clientX <= rect.right
+    && event.clientY >= rect.top && event.clientY <= rect.bottom;
   if (pointerDrag.groupTarget === target) {
     return;
   }
@@ -7169,6 +7171,7 @@ function beginGroupExitDrag() {
       : card.dataset.id === groupPointerDrag.siteId);
   groupPointerDrag.externalCard = externalCard ?? null;
   externalCard?.classList.add('sort-dragging');
+  if (externalCard) groupDragEffect.matchItemSize(externalCard);
 }
 
 function updateGroupExitPosition(event) {
