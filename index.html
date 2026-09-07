@@ -439,6 +439,22 @@
     </form>
   </dialog>
 
+  <dialog id="bulkDeleteDialog" class="bulk-delete-dialog" aria-labelledby="bulkDeleteTitle">
+    <div class="bulk-delete-confirm-card">
+      <span class="bulk-delete-warning" aria-hidden="true">!</span>
+      <div>
+        <span class="section-kicker">DELETE SHORTCUTS</span>
+        <h2 id="bulkDeleteTitle">确认批量删除？</h2>
+        <p id="bulkDeleteSummary"></p>
+        <small>删除后会从当前工作区移除，确认后仍可在提示条中撤销。</small>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="cancelBulkDelete" class="secondary" data-button="off">取消</button>
+        <button type="button" id="confirmBulkDelete" class="danger" data-button="off">确认删除</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="galleryAddDialog" class="gallery-add-dialog">
     <form id="galleryAddForm">
       <div class="dialog-heading">

@@ -121,6 +121,8 @@ let currentCategory = 'all';
 let currentEngine = engines[0];
 let searchQuery = '';
 let activeGroupId = null;
+let bulkDeleteMode = false;
+const bulkDeleteSelection = new Set();
 let currentUser = null;
 let galleryItems = normalizeGalleryItems(store.get('mos-gallery-items', defaultGalleryItems));
 if (store.get('mos-gallery-default-removal-version', 0) < 1) {
@@ -581,6 +583,14 @@ function renderGroupedSites(sites) {
 }
 
 function renderCategoryTabs() {
+  const selectedCount = bulkDeleteSelection.size;
+  const visibleKeys = $$('#siteGrid .site-card').map(bulkDeleteCardKey).filter(Boolean);
+  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every(key => bulkDeleteSelection.has(key));
+  const bulkActions = bulkDeleteMode
+    ? `<button class="category-bulk-action category-bulk-cancel" type="button" data-bulk-delete-cancel data-button="off">取消</button>
+      <button class="category-bulk-action" type="button" data-bulk-delete-select-all data-button="off" ${visibleKeys.length ? '' : 'disabled'}>${allVisibleSelected ? '取消全选' : '全选'}</button>
+      <button class="category-bulk-action category-bulk-confirm" type="button" data-bulk-delete-confirm data-button="off" ${selectedCount ? '' : 'disabled'}>删除 ${selectedCount}</button>`
+    : '<button class="category-bulk-action" type="button" data-bulk-delete-start data-button="off">批量删除</button>';
   $('#categoryTabs').innerHTML = `${allCategories().map(category => {
     const isCustom = category.custom;
     const isRemovable = category.id !== 'all';
@@ -588,7 +598,72 @@ function renderCategoryTabs() {
       ${rollingNavLabel(category.name)}
       ${isRemovable ? `<span class="tab-remove" data-remove-category="${category.id}" title="删除分类" aria-label="删除 ${escapeHTML(category.name)}">×</span>` : ''}
     </button>`;
-  }).join('')}<button class="category-add" type="button" data-add-category aria-label="新建分类"><span class="category-add-shell" data-specular-outline><span class="add-symbol">＋</span><span>新建分类</span></span></button>`;
+  }).join('')}${bulkActions}<button class="category-add" type="button" data-add-category aria-label="新建分类"><span class="category-add-shell" data-specular-outline><span class="add-symbol">＋</span><span>新建分类</span></span></button>`;
+}
+
+function bulkDeleteCardKey(card) {
+  if (card?.dataset.groupId) return `group:${card.dataset.groupId}`;
+  if (card?.dataset.id) return `site:${card.dataset.id}`;
+  return '';
+}
+
+function updateBulkDeleteCards() {
+  const grid = $('#siteGrid');
+  grid.classList.toggle('bulk-delete-mode', bulkDeleteMode);
+  $$('#siteGrid .site-card').forEach(card => {
+    card.querySelector('.bulk-delete-indicator')?.remove();
+    const key = bulkDeleteCardKey(card);
+    const selected = bulkDeleteMode && bulkDeleteSelection.has(key);
+    card.classList.toggle('bulk-delete-selected', selected);
+    if (bulkDeleteMode) {
+      const cardName = card.querySelector('h3')?.textContent?.trim() || '该项';
+      card.setAttribute('role', 'checkbox');
+      card.setAttribute('aria-checked', String(selected));
+      card.setAttribute('aria-label', `选择 ${cardName}`);
+      card.setAttribute('tabindex', '0');
+      const indicator = document.createElement('span');
+      indicator.className = 'bulk-delete-indicator';
+      indicator.setAttribute('aria-hidden', 'true');
+      indicator.textContent = '✓';
+      card.appendChild(indicator);
+    } else {
+      card.removeAttribute('aria-checked');
+      if (card.dataset.groupId) {
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+      } else {
+        card.removeAttribute('role');
+        card.removeAttribute('tabindex');
+      }
+    }
+  });
+}
+
+function setBulkDeleteMode(enabled) {
+  bulkDeleteMode = Boolean(enabled);
+  if (!bulkDeleteMode) bulkDeleteSelection.clear();
+  renderSites();
+}
+
+function toggleBulkDeleteCard(card) {
+  const key = bulkDeleteCardKey(card);
+  if (!key) return;
+  if (bulkDeleteSelection.has(key)) bulkDeleteSelection.delete(key);
+  else bulkDeleteSelection.add(key);
+  updateBulkDeleteCards();
+  renderCategoryTabs();
+}
+
+function toggleBulkDeleteSelectAll() {
+  const visibleKeys = $$('#siteGrid .site-card').map(bulkDeleteCardKey).filter(Boolean);
+  if (!visibleKeys.length) return;
+  const allVisibleSelected = visibleKeys.every(key => bulkDeleteSelection.has(key));
+  visibleKeys.forEach(key => {
+    if (allVisibleSelected) bulkDeleteSelection.delete(key);
+    else bulkDeleteSelection.add(key);
+  });
+  updateBulkDeleteCards();
+  renderCategoryTabs();
 }
 
 function renderCategoryOptions() {
@@ -609,6 +684,7 @@ function renderSites() {
   const siteMarkup = groupedView ? renderGroupedSites(sites) : sites.map(siteCard).join('');
   $('#siteGrid').innerHTML = siteMarkup;
   $('#siteGrid').classList.add('compact-grid');
+  updateBulkDeleteCards();
   $('#emptyState').hidden = sites.length > 0 || !query;
   if (query && sites.length === 0) {
     $('#emptyState h3').textContent = '没有找到匹配的网址';
@@ -4587,6 +4663,22 @@ function doSearch(query) {
 }
 
 $('#categoryTabs').addEventListener('click', event => {
+  if (event.target.closest('[data-bulk-delete-start]')) {
+    setBulkDeleteMode(true);
+    return;
+  }
+  if (event.target.closest('[data-bulk-delete-cancel]')) {
+    setBulkDeleteMode(false);
+    return;
+  }
+  if (event.target.closest('[data-bulk-delete-select-all]')) {
+    toggleBulkDeleteSelectAll();
+    return;
+  }
+  if (event.target.closest('[data-bulk-delete-confirm]')) {
+    openBulkDeleteConfirmation();
+    return;
+  }
   const remove = event.target.closest('[data-remove-category]');
   if (remove) {
     const categoryId = remove.dataset.removeCategory;
@@ -4639,6 +4731,14 @@ $('#categoryTabs').addEventListener('click', event => {
 });
 
 $('#bookmarksView').addEventListener('click', event => {
+  if (bulkDeleteMode) {
+    const card = event.target.closest('.site-card');
+    if (!card) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleBulkDeleteCard(card);
+    return;
+  }
   const action = event.target.closest('[data-action]');
   if (!action) {
     const card = event.target.closest('.site-card');
@@ -4744,6 +4844,13 @@ document.addEventListener('click', event => {
 });
 
 $('#siteGrid').addEventListener('keydown', event => {
+  if (bulkDeleteMode) {
+    const card = event.target.closest('.site-card');
+    if (!card || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    toggleBulkDeleteCard(card);
+    return;
+  }
   const groupCard = event.target.closest('[data-group-id]');
   if (!groupCard || !['Enter', ' '].includes(event.key)) return;
   event.preventDefault();
@@ -4908,7 +5015,7 @@ function cancelGroupTarget() {
 }
 
 siteGrid.addEventListener('pointerdown', event => {
-  if (event.pointerType !== 'mouse' || event.button !== 0 || event.target.closest('.card-actions')) return;
+  if (bulkDeleteMode || event.pointerType !== 'mouse' || event.button !== 0 || event.target.closest('.card-actions')) return;
   const card = event.target.closest(sortableSiteSelector);
   if (!card) return;
   pointerDrag = {
@@ -7133,6 +7240,98 @@ $('#confirmCategory').addEventListener('click', () => {
   renderSites();
   showToast('新分类已创建');
 });
+
+const bulkDeleteDialog = $('#bulkDeleteDialog');
+
+function selectedBulkDeleteSiteIds() {
+  const ids = new Set();
+  bulkDeleteSelection.forEach(key => {
+    const [type, id] = key.split(':');
+    if (type === 'site' && id) ids.add(id);
+    if (type === 'group' && id) collectGroupSiteIds(id).forEach(siteId => ids.add(siteId));
+  });
+  return ids;
+}
+
+function openBulkDeleteConfirmation() {
+  if (!bulkDeleteMode || !bulkDeleteSelection.size) return;
+  const siteIds = selectedBulkDeleteSiteIds();
+  const groupCount = [...bulkDeleteSelection].filter(key => key.startsWith('group:')).length;
+  $('#bulkDeleteSummary').textContent = groupCount
+    ? `将删除 ${siteIds.size} 个网址，其中包含 ${groupCount} 个分组。`
+    : `将删除已选择的 ${siteIds.size} 个网址。`;
+  bulkDeleteDialog.showModal();
+}
+
+function pruneEmptySiteGroups() {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const invalidIds = new Set(siteGroups
+      .filter(group => new Set(collectGroupSiteIds(group.id)).size < 2)
+      .map(group => group.id));
+    if (!invalidIds.size) break;
+    siteGroups = siteGroups.filter(group => !invalidIds.has(group.id));
+    siteGroups.forEach(group => {
+      if (group.parentId && invalidIds.has(group.parentId)) group.parentId = null;
+    });
+    changed = true;
+  }
+}
+
+function confirmBulkDelete() {
+  const siteIds = selectedBulkDeleteSiteIds();
+  if (!siteIds.size) {
+    bulkDeleteDialog.close();
+    setBulkDeleteMode(false);
+    return;
+  }
+
+  const previous = {
+    customSites: structuredClone(customSites),
+    hiddenSites: new Set(hiddenSites),
+    siteOrder: [...siteOrder],
+    siteGroups: structuredClone(siteGroups)
+  };
+  const builtInIds = new Set(baseSites.map(site => site.id));
+  siteIds.forEach(id => {
+    if (builtInIds.has(id)) hiddenSites.add(id);
+  });
+  customSites = customSites.filter(site => !siteIds.has(site.id));
+  siteOrder = siteOrder.filter(id => !siteIds.has(id));
+  siteGroups = siteGroups.map(group => ({
+    ...group,
+    siteIds: group.siteIds.filter(id => !siteIds.has(id))
+  }));
+  pruneEmptySiteGroups();
+  store.set('mos-hidden-sites', [...hiddenSites]);
+  store.set('mos-custom-sites', customSites);
+  store.set('mos-site-order', siteOrder);
+  persistGroups();
+
+  const deletedCount = siteIds.size;
+  bulkDeleteDialog.close();
+  setBulkDeleteMode(false);
+  showToast(`已删除 ${deletedCount} 个网址`, {
+    duration: 6000,
+    actionLabel: '撤销',
+    onAction: () => {
+      customSites = previous.customSites;
+      hiddenSites = previous.hiddenSites;
+      siteOrder = previous.siteOrder;
+      siteGroups = previous.siteGroups;
+      store.set('mos-hidden-sites', [...hiddenSites]);
+      store.set('mos-custom-sites', customSites);
+      store.set('mos-site-order', siteOrder);
+      persistGroups();
+      renderSites();
+      showToast('已撤销批量删除');
+    }
+  });
+}
+
+$('#cancelBulkDelete').addEventListener('click', () => bulkDeleteDialog.close());
+$('#confirmBulkDelete').addEventListener('click', confirmBulkDelete);
 
 const groupDialog = $('#groupDialog');
 const groupDialogSites = $('#groupDialogSites');

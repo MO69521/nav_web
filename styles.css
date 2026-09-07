@@ -244,6 +244,14 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .category-add:active .category-add-shell { transform:scale(.97); }
 .category-add:focus-visible { outline:none; }
 .category-add:focus-visible .category-add-shell { outline:2px solid var(--accent); outline-offset:3px; }
+.category-bulk-action { height:36px; flex:0 0 auto; padding:0 14px; border:1px solid rgba(82,82,82,.52); border-radius:12px; background:rgba(255,255,255,.012); color:var(--muted); font:inherit; font-size:11px; cursor:pointer; transition:color .18s ease,border-color .18s ease,background-color .18s ease,transform .18s ease; }
+.category-bulk-action[data-bulk-delete-start], .category-bulk-cancel { margin-left:auto; }
+.category-bulk-action:hover { color:var(--text); background:rgba(255,255,255,.025); transform:translateY(-1px); }
+.category-bulk-action:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.category-bulk-action:disabled { opacity:.38; cursor:not-allowed; transform:none; }
+.category-bulk-confirm { border-color:rgba(255,104,117,.32); color:#ff8d97; }
+.category-bulk-confirm:not(:disabled):hover { border-color:rgba(255,104,117,.52); color:#ffb0b7; background:rgba(255,90,105,.08); }
+.category-bulk-action + .category-add { margin-left:0; padding-left:10px; }
 
 .content-section { position:relative; }
 .bookmark-drop-overlay { position:fixed; z-index:890; inset:0; display:grid; place-items:center; padding:24px; background:rgba(7,9,13,.72); backdrop-filter:blur(10px); opacity:0; visibility:hidden; pointer-events:none; transition:opacity .18s ease,visibility .18s ease; }
@@ -847,6 +855,13 @@ kbd { padding: 4px 8px; border: 1px solid var(--line); border-bottom-color: rgba
 .site-grid.compact-grid { --site-grid-item-min-width:96px; grid-template-columns:repeat(auto-fit,minmax(var(--site-grid-item-min-width),1fr)); justify-content:stretch; column-gap:8px; row-gap:16px; padding:8px 0 18px; }
 .site-grid.compact-grid .site-card { min-height: 134px; flex-direction: column; align-items: center; justify-content: flex-start; padding: 16px 0; gap: 16px; border: 0; background: rgba(255,255,255,.02); box-shadow: none; text-align: center; overflow: visible; }
 .site-grid.compact-grid .site-card:hover { transform: translateY(-3px); border: 0; background: rgba(255,255,255,.03); box-shadow: none; }
+.site-grid.bulk-delete-mode .site-card { cursor:pointer; }
+.site-grid.bulk-delete-mode .site-card:hover { transform:none; background:rgba(255,255,255,.035); }
+.site-grid.bulk-delete-mode .card-link { pointer-events:none; }
+.site-grid.bulk-delete-mode .card-actions { display:none; }
+.bulk-delete-indicator { position:absolute; z-index:6; top:10px; right:10px; width:21px; height:21px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.24); border-radius:7px; background:rgba(8,11,16,.78); color:transparent; font-size:12px; font-weight:700; pointer-events:none; transition:.18s ease; }
+.site-card.bulk-delete-selected { background:rgba(110,168,254,.09) !important; box-shadow:inset 0 0 0 2px rgba(110,168,254,.58) !important; }
+.site-card.bulk-delete-selected .bulk-delete-indicator { border-color:var(--accent); background:var(--accent); color:#07101d; transform:scale(1.06); }
 .is-dragging-sites, .is-dragging-sites * { cursor: grabbing !important; user-select: none; }
 .site-grid .sort-dragging, .group-dialog-sites .sort-dragging { opacity:.16; transform:scale(.92); background:rgba(110,168,254,.08); outline:1px dashed rgba(110,168,254,.38); pointer-events:none; }
 .site-grid .sort-reflow-from, .group-dialog-sites .sort-reflow-from { transition:none !important; transform:translate(var(--sort-reflow-x),var(--sort-reflow-y)) !important; }
@@ -1057,6 +1072,16 @@ dialog input:focus, dialog select:focus { border-color:rgba(110,168,254,.45); }
 .dialog-actions button { height:40px; padding:0 18px; border-radius:10px; cursor:pointer; }
 .dialog-actions .secondary { border:1px solid var(--line); background:transparent; color:var(--muted); }
 .dialog-actions .primary { border:0; background:var(--accent); color:#081526; font-weight:600; }
+.dialog-actions .danger { border:0; background:#ff6d79; color:#24070b; font-weight:700; }
+.dialog-actions .danger:hover { background:#ff8791; }
+.bulk-delete-dialog { width:min(430px,calc(100% - 30px)); border-radius:22px; background:rgba(18,22,30,.98); box-shadow:0 28px 90px rgba(0,0,0,.5); }
+.bulk-delete-confirm-card { display:grid; justify-items:center; gap:18px; padding:32px; text-align:center; }
+.bulk-delete-warning { width:48px; height:48px; display:grid; place-items:center; border-radius:50%; background:rgba(255,90,105,.12); color:#ff7f8a; font-size:25px; font-weight:700; }
+.bulk-delete-confirm-card h2 { margin:8px 0 9px; font-size:22px; }
+.bulk-delete-confirm-card p { margin:0; color:var(--text); font-size:13px; line-height:1.6; }
+.bulk-delete-confirm-card small { display:block; margin-top:7px; color:var(--muted); font-size:10px; line-height:1.6; }
+.bulk-delete-confirm-card .dialog-actions { margin-top:2px; }
+.light-theme .bulk-delete-dialog { background:rgba(250,251,253,.98); box-shadow:0 28px 80px rgba(31,42,56,.2); }
 .toast { position:fixed; z-index:50; left:50%; bottom:25px; transform:translate(-50%,20px); min-width:190px; min-height:46px; padding:10px 12px 10px 16px; display:flex; align-items:center; justify-content:space-between; gap:24px; border:1px solid var(--line); border-radius:13px; background:#21262d; color:var(--text); font-size:12px; opacity:0; pointer-events:none; transition:.25s; box-shadow:var(--shadow); }
 .toast.show { opacity:1; transform:translate(-50%,0); pointer-events:auto; }
 .toast-content { display:flex; align-items:center; gap:10px; min-width:0; }
